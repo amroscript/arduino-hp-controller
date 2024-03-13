@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         mainLayout = QVBoxLayout()
 
         self.logoLabel = QLabel() # Logo set-up
-        logoPixmap = QPixmap("Arduino Controller.png")
+        logoPixmap = QPixmap("arduino controller.png")
         scaledLogoPixmap = logoPixmap.scaled(550, 350, Qt.KeepAspectRatio)
         self.logoLabel.setPixmap(scaledLogoPixmap)
         self.logoLabel.setAlignment(Qt.AlignCenter)
