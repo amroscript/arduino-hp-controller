@@ -4,7 +4,7 @@ This repository consists of an Arduino-driven controller is designed to monitor 
 ## Installation 
 
 In order to use this package, you can either install it via pip install (see
-below) or simply download the Python files and use them in your own script. 
+below) or simply download the Python/Arduino files and use them in your own script. 
 Installation steps are:
 1.  Download or clone the repository via git: 
 `git clone https://github.com/amroscript/arduino-hp-controller/`
