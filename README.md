@@ -15,12 +15,11 @@ In order to use this package, you can download the Python/Arduino files. If usin
 
 ## Documentation
 
-If using _mock-arduino.py_ to mimick an arduino environment for the controller:
+1. If using _mock-arduino.py_ to mimick an arduino environment for the controller:
 
-1. Establish a bidirectional serial stream using socat.
+–– Establish a bidirectional serial stream using socat.
 
 This command will create two interconnected virtual serial ports. Open a terminal and enter: 
-
 
 `socat -d -d pty,raw,echo=0 pty,raw,echo=0` Note the output from this command, which will give you the paths to the virtual serial ports.
 
