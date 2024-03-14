@@ -6,6 +6,7 @@ This repository consists of an Arduino-driven controller is designed to monitor 
 In order to use this package, you can download the Python/Arduino files. If using VScode, ensure the Arduino extension(s) are downloaded.
 
 1. Download or clone the repository via git: 
+
 `git clone https://github.com/amroscript/arduino-hp-controller/`
 
 2. Install required Python libraries. Navigate to the cloned repository directory and install the required Python packages using pip:
