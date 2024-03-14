@@ -15,7 +15,7 @@ In order to use this package, you can download the Python/Arduino files. If usin
 
 ## Documentation
 
-**METHOD ONE:** If using mock-arduino.py to mimick an arduino environment for the controller:
+If using _mock-arduino.py_ to mimick an arduino environment for the controller:
 
 1. Establish a bidirectional serial stream using socat.
 
