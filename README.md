@@ -29,7 +29,7 @@ Note the output from this command, which will give you the paths to the virtual 
 
 For example, if socat outputted /dev/pts/3 and /dev/pts/4, you would set ARDUINO_PORT = '/dev/pts/3' in your Python script.
 
-**METHOD TWO:** If set-up is available, use read-temp.ino.
+2. If set-up is available, use _read-temp.ino_.
 
 
 
