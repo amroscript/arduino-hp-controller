@@ -9,6 +9,7 @@ In order to use this package, you can download the Python/Arduino files. If usin
 `git clone https://github.com/amroscript/arduino-hp-controller/`
 
 2. Install required Python libraries. Navigate to the cloned repository directory and install the required Python packages using pip:
+
 `pip install -r requirements.txt`
 
 ## Documentation
