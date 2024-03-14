@@ -7,6 +7,6 @@ In order to use this package, you can download the Python/Arduino files and use 
 Installation steps are:
 1.  Download or clone the repository via git: 
 `git clone https://github.com/amroscript/arduino-hp-controller/`
-2. If using mock-arduino.py script which mimicks an arduino environment for the controller, ensure you use socat to establishes two bidirectional serial streams and change your port settings accordingly:
+2. If using mock-arduino.py script which mimicks an arduino environment for the controller, ensure you use socat to establishes two bidirectional serial streams by using this in your terminal: socat `-d -d pty,raw,echo=0 pty,raw,echo=0` and change your arduino ports in the script(s) as necessary.
 
 ## Documentation
