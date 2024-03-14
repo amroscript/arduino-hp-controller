@@ -3,7 +3,7 @@ This repository consists of an Arduino-driven controller is designed to monitor 
 
 ## Installation 
 
-In order to use this package, you can download the Python/Arduino files. If using VScode, ensure the Arduino extension(s) are downloaded.
+In order to use this package, you should download the Python/Arduino files. 
 
 1. Download or clone the repository via git: 
 
@@ -12,6 +12,8 @@ In order to use this package, you can download the Python/Arduino files. If usin
 2. Install required Python libraries. Navigate to the cloned repository directory and install the required Python packages using pip:
 
 `pip install -r requirements.txt`
+
+If you are using VSCode, ensure you have the Arduino extension (e.g., "Arduino for Visual Studio Code" by Microsoft) installed.
 
 ## Documentation
 
