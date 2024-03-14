@@ -1,9 +1,15 @@
-import sys, pyserial
-# import random # simulation
+# library/package set-up for GUI
+import sys
+import serial
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, \
-    QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QFrame, QSizePolicy, QMessageBox, QPlainTextEdit
+    QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QFrame, QSizePolicy, QPlainTextEdit, \
+    QTabWidget, QTableWidget, QTableWidgetItem
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt
+
+# Arduino serial connection set-up
+ARDUINO_PORT = '/dev/ttys034'
+BAUD_RATE = 9600
 
 # User-interface theme customization
 def applyOneDarkProTheme(app):
@@ -24,7 +30,6 @@ def applyOneDarkProTheme(app):
     palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
     app.setPalette(palette)
 
-    # Additional style sheet for further customization
     app.setStyleSheet("""
     QMainWindow, QWidget {
         background-color: #282C34; 
@@ -54,6 +59,21 @@ def applyOneDarkProTheme(app):
     QPushButton#initButton {
         background-color: #98C379;
     }
+    QPushButton#initButton:hover {
+        background-color: #A8D989; /* Lighter shade for hover on initButton */
+    }
+    QPushButton#updateButton {
+        background-color: #61AFEF; /* Specific color for update button */
+    }
+    QPushButton#updateButton:hover {
+        background-color: #72BFF7; /* Lighter shade for hover on update button */
+    }
+    QPushButton#stopButton {
+        background-color: #E06C75; /* Specific color for stop button */
+    }
+    QPushButton#stopButton:hover {
+        background-color: #EF7A85; /* Lighter shade for hover on stop button */
+    }
     QGroupBox {
         border: 2px solid #3B4048; 
         margin-top: 20px; 
@@ -63,49 +83,120 @@ def applyOneDarkProTheme(app):
     }
     """)
 
+# Serial connection initialization and pop-up window set-up
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("")
-        self.setGeometry(200, 200, 1000, 800) 
+        self.setGeometry(200, 200, 1000, 600) 
         self.setupUI()
         applyOneDarkProTheme(QApplication.instance())
+        
+        self.arduinoSerial = None  # Initialize arduinoSerial attribute to None
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.updateDisplay)
+        self.timer.start(1000)  # Refresh rate in milliseconds
         self.initSerialConnection() # Initialize serial connection with Arduino
 
     def initSerialConnection(self):
-        """Initialize serial connection to Arduino."""
-        try:
-            # Setup serial connection (Adjust 'COM3' and 9600 according to your setup)
-            self.arduinoSerial = serial.Serial('COM3', 9600, timeout=1)
-        except serial.SerialException as e:
-            print(f"Error connecting to Arduino: {e}")
+            try:
+                self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+                self.logToTerminal("> Serial connection established.")
+            except serial.SerialException as e:
+                self.logToTerminal(f"> Error connecting to Arduino: {e}", messageType="error")
 
+    # Formatting: logo and setting up controls
     def setupUI(self):
         self.setFont(QFont("Verdana", 12))
         mainLayout = QVBoxLayout()
+        tabWidget = QTabWidget()
 
         self.logoLabel = QLabel() # Logo set-up
-        logoPixmap = QPixmap("arduino controller.png")
-        scaledLogoPixmap = logoPixmap.scaled(550, 350, Qt.KeepAspectRatio)
+        logoPixmap = QPixmap("Arduino Controller.png")
+        scaledLogoPixmap = logoPixmap.scaled(500, 300, Qt.KeepAspectRatio)
         self.logoLabel.setPixmap(scaledLogoPixmap)
         self.logoLabel.setAlignment(Qt.AlignCenter)
-        mainLayout.addWidget(self.logoLabel)
-
-        self.measurementGroup = self.createMeasurementGroup()
-        self.controlGroup = self.createControlGroup()
-        self.terminal = self.createTerminal()
-
-        # Directly add groups and terminal to the main layout
-        mainLayout.addWidget(self.measurementGroup)
-        mainLayout.addWidget(self.controlGroup)
-        mainLayout.addWidget(self.terminal, 1)  # Give the terminal some stretch factor
 
         self.setCentralWidget(QWidget())
         self.centralWidget().setLayout(mainLayout)
 
-        self.thread = MockArduinoThread()
-        self.thread.updated.connect(self.updateDisplay)
-        self.thread.start()
+        # Create the first tab for existing controls
+        controlsTab = QWidget()
+        controlsLayout = QVBoxLayout()
+        controlsLayout.addWidget(self.logoLabel)
+        self.measurementGroup = self.createMeasurementGroup()
+        self.controlGroup = self.createControlGroup()
+        self.terminal = self.createTerminal()
+        controlsLayout.addWidget(self.measurementGroup)
+        controlsLayout.addWidget(self.controlGroup)
+        controlsLayout.addWidget(self.terminal, 1)  # Give terminal some stretch factor
+        controlsTab.setLayout(controlsLayout)
+
+        # Create the second tab for the spreadsheet
+        spreadsheetTab = QWidget()
+        spreadsheetLayout = QVBoxLayout()
+        self.tableWidget = QTableWidget()
+        self.tableWidget.setColumnCount(4)  # For Temperature, Resistance, Voltage, Flow Rate
+        self.tableWidget.setHorizontalHeaderLabels(["Temperature", "Resistance", "Voltage", "Flow Rate"])
+
+        # Set stylesheet for the table headers
+        self.tableWidget.setStyleSheet("""
+            QTableWidget {
+                border: none;
+                background-color: #282C34;
+                color: #ABB2BF;
+                gridline-color: #3B4048;
+                selection-background-color: #3E4451;
+                selection-color: #ABB2BF;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QHeaderView::section {
+                background-color: #3B4048;
+                color: #ABB2BF;
+                padding: 5px;
+                border: 1px solid #282C34;
+                font-size: 12pt;
+                font-family: 'Verdana';
+            }
+            QScrollBar:vertical {
+                border: none;
+                background-color: #282C34;
+                width: 14px;
+                margin: 15px 0 15px 0;
+                border-radius: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #3B4048;
+                min-height: 30px;
+                border-radius: 7px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                background: none;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
+
+        spreadsheetLayout.addWidget(self.tableWidget)
+        spreadsheetTab.setLayout(spreadsheetLayout)
+
+        # Add tabs to the QTabWidget
+        tabWidget.addTab(controlsTab, "Controls")
+        tabWidget.addTab(spreadsheetTab, "Data Spreadsheet")
+
+        # Set the QTabWidget as the central widget
+        self.setCentralWidget(tabWidget)
+
+    def addToSpreadsheet(self, temperature, resistance, voltage, flowRate):
+        rowPosition = self.tableWidget.rowCount()
+        self.tableWidget.insertRow(rowPosition)
+        self.tableWidget.setItem(rowPosition, 0, QTableWidgetItem(temperature))
+        self.tableWidget.setItem(rowPosition, 1, QTableWidgetItem(resistance))
+        self.tableWidget.setItem(rowPosition, 2, QTableWidgetItem(voltage))
+        self.tableWidget.setItem(rowPosition, 3, QTableWidgetItem(flowRate))
 
     def createMeasurementGroup(self):
         group = QGroupBox("Instructions and Real-time Measurements")
@@ -186,12 +277,10 @@ class MainWindow(QMainWindow):
 
         self.updateButton = QPushButton("Update Settings")
         self.updateButton.setObjectName("updateButton")
-        self.updateButton.setStyleSheet("background-color: #61AFEF;")  # Green
         self.updateButton.clicked.connect(self.updateSettings)
 
         self.stopButton = QPushButton("Stop")
         self.stopButton.setObjectName("stopButton")
-        self.stopButton.setStyleSheet("background-color: #E06C75;")  # Red
         self.stopButton.clicked.connect(self.stopOperations)
 
         self.updateButton.setEnabled(False)  # Initially disabled
@@ -245,27 +334,86 @@ class MainWindow(QMainWindow):
         newValue = currentValue + increment
         lineEdit.setText(f"{newValue:.1f}" if increment < 1 else f"{newValue}")
 
-    def updateDisplay(self, data):
-        temperature, resistance, dacVoltage, flowRate = data.split(', ')
-        self.temperatureLabel.setText(f"{temperature}°C")
-        self.resistanceLabel.setText(f"{resistance}Ω")
-        self.dacVoltageLabel.setText(f"{dacVoltage}V")
-        self.flowRateLabel.setText(f"{flowRate}L/s")
+    def updateDisplay(self):
+        try:
+            if self.arduinoSerial and self.arduinoSerial.in_waiting:
+                serialData = self.arduinoSerial.readline().decode('utf-8').strip()
+                print(f"Received data: {serialData}")  # Debug print
+                dataFields = serialData.split(',')
+                # Initialize variables
+                temperature = resistance = voltage = flowRate = "N/A"
+                for field in dataFields:
+                    try:
+                        key, value = field.split(':', 1)
+                        print(f"Key: {key}, Value: {value}")  # Debug print
+                        if key.strip() == 'Temp':
+                            self.temperatureLabel.setText(f"{value}°C")
+                            temperature = value
+                        elif key.strip() == 'Res':
+                            self.resistanceLabel.setText(f"{value}Ω")
+                            resistance = value
+                        elif key.strip() == 'Volt':
+                            self.dacVoltageLabel.setText(f"{value}V")
+                            voltage = value
+                        elif key.strip() == 'Flow':
+                            self.flowRateLabel.setText(f"{value}L/s")
+                            flowRate = value
+                    except ValueError as ve:
+                        print(f"Error parsing field: {field}. Error: {ve}")
+                # After updating labels, add to spreadsheet
+                self.addToSpreadsheet(temperature, resistance, voltage, flowRate)
+        except serial.SerialException as e:
+            self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
+
 
     def updateSettings(self):
         temp = self.targetTempInput.text()
         tol = self.toleranceInput.text()
         dacV = self.dacVoltageInput.text()
-        self.logToTerminal(f"> Control settings updated: Temp= {temp}, Tolerance= {tol}, DAC Voltage= {dacV}.")
+        # Format the settings into a string. Example: "SET,Temp=25,Tol=0.1,Volt=2.5"
+        settingsStr = f"SET,Temp={temp},Tol={tol},Volt={dacV}\n"
+
+        # Check if serial connection is established
+        if self.arduinoSerial and self.arduinoSerial.isOpen():
+            try:
+                # Send the settings string to the Arduino
+                self.arduinoSerial.write(settingsStr.encode('utf-8'))
+                self.logToTerminal(f"> Control settings sent: Temp={temp}, Tolerance={tol}, DAC Voltage={dacV}.")
+            except serial.SerialException as e:
+                self.logToTerminal(f"> Error sending settings to Arduino: {e}", messageType="error")
+        else:
+            self.logToTerminal("> Serial connection not established. Unable to send settings.", messageType="error")
 
     def stopOperations(self):
-        self.thread.terminate()
+        # Stop the QTimer
+        if self.timer.isActive():
+            self.timer.stop()
+            self.logToTerminal("> Timer stopped.")
+        
+        # Optionally, close the serial connection
+        if self.arduinoSerial and self.arduinoSerial.isOpen():
+            self.arduinoSerial.close()
+            self.logToTerminal("> Serial connection closed.")
+        
         self.logToTerminal("> Operations halted.")
 
-    def initButtonClicked(self): 
-        self.thread.terminate()
-        self.logToTerminal("> System initialized.")
-    
+    def initButtonClicked(self):
+        # Optionally, re-open the serial connection if it was closed
+        if self.arduinoSerial is None or not self.arduinoSerial.isOpen():
+            try:
+                self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+                self.logToTerminal("> Serial connection re-established.")
+            except serial.SerialException as e:
+                self.logToTerminal(f"> Error reconnecting to Arduino: {e}", messageType="error")
+                return  # Early return if connection fails
+
+        # Restart the QTimer
+        if not self.timer.isActive():
+            self.timer.start(1000)  # Adjust the interval as necessary
+            self.logToTerminal("> Timer restarted.")
+
+        self.logToTerminal("> System re-initialized.")
+
         # Enable the Update Settings and Stop buttons
         self.updateButton.setEnabled(True)
         self.stopButton.setEnabled(True)
@@ -287,27 +435,7 @@ class MainWindow(QMainWindow):
         # Append the formatted message to the terminal
         self.terminal.appendHtml(formattedMessage)
 
-
-class MockArduinoThread(QThread):
-    updated = pyqtSignal(str)
-
-    def __init__(self):
-        super().__init__()
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.generateData)
-        self.timer.start(1000)
-
-    def generateData(self):
-        temperature = str(random.randint(20, 30))
-        resistance = str(random.randint(100, 200))
-        dacVoltage = f"{random.uniform(0, 5):.2f}"
-        flowRate = f"{random.uniform(0, 1):.2f}"
-        self.updated.emit(f"{temperature}, {resistance}, {dacVoltage}, {flowRate}")
-
-
 if __name__ == "__main__":
-    import sys
-
     app = QApplication(sys.argv)
     applyOneDarkProTheme(app)
     window = MainWindow()
