@@ -15,7 +15,7 @@ In order to use this package, you can download the Python/Arduino files. If usin
 
 ## Documentation
 
-METHOD ONE: If using mock-arduino.py to mimick an arduino environment for the controller:
+**METHOD ONE:** If using mock-arduino.py to mimick an arduino environment for the controller:
 
 1. Establish a bidirectional serial stream using socat. This command will create two interconnected virtual serial ports. Open a terminal and enter: 
 `socat -d -d pty,raw,echo=0 pty,raw,echo=0` Note the output from this command, which will give you the paths to the virtual serial ports.
@@ -23,7 +23,7 @@ METHOD ONE: If using mock-arduino.py to mimick an arduino environment for the co
 2. Update the Arduino port in your script. With the virtual serial ports created, you'll need to update the ARDUINO_PORT variable in your Python script(s) to match one of the virtual ports created by socat.
 For example, if socat outputted /dev/pts/3 and /dev/pts/4, you would set ARDUINO_PORT = '/dev/pts/3' in your Python script.
 
-METHOD TWO: If set-up is available, use read-temp.ino.
+**METHOD TWO:** If set-up is available, use read-temp.ino.
 
 
 
