@@ -60,7 +60,11 @@ In order to use this package, you should download the Python/Arduino files.
 
     – **Export Data:** Click the "Export to CSV" button to save the data for offline analysis.
 
+## Image Preview
 
+![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/d30b31a8-5c83-4e93-84ea-e2d63217f26b)
+
+![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/e670c02f-aac0-450f-af79-779538deb5a3)
 
 
 
