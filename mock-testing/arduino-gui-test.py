@@ -1,14 +1,21 @@
 # library/package set-up for GUI
 import sys
 import serial
+import csv
+import time
+from matplotlib.backends.backend_qt import MainWindow
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, \
     QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QFrame, QSizePolicy, QPlainTextEdit, \
     QTabWidget, QTableWidget, QTableWidgetItem
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
 from PyQt5.QtCore import QTimer, Qt
 
+
 # Arduino serial connection set-up
-ARDUINO_PORT = '/dev/ttys034'
+ARDUINO_PORT = '/dev/ttys074'# Change based on port
 BAUD_RATE = 9600
 
 # User-interface theme customization
@@ -84,19 +91,46 @@ def applyOneDarkProTheme(app):
     """)
 
 # Serial connection initialization and pop-up window set-up
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(self, parent=None):
+        super(MainWindow, self).__init__(parent)
+
+        self.logoLabel = None
+        self.arduinoSerial = None
+        self.timer = None
+        self.time_data = []
+        self.temperature_data = []
+        self.flow_rate_data = []
+        self.stopButton = None
+        self.resistanceLabel = None
+        self.measurementGroup = None
+        self.exportCSVButton = None
+        self.controlGroup = None
+        self.flowRateLabel = None
+        self.dacVoltageLabel = None
+        self.dacVoltageInput = None
+        self.updateButton = None
+        self.toleranceInput = None
+        self.projectNumberInput = None
+        self.temperatureLabel = None
+        self.clientNameInput = None
+        self.initButton = None
+        self.dateInput = None
+        self.terminal = None
+        self.targetTempInput = None
+        self.tableWidget = None
+
         self.setWindowTitle("")
-        self.setGeometry(200, 200, 1000, 600) 
+        self.setGeometry(200, 200, 1000, 600)
         self.setupUI()
         applyOneDarkProTheme(QApplication.instance())
-        
+
         self.arduinoSerial = None  # Initialize arduinoSerial attribute to None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateDisplay)
         self.timer.start(1000)  # Refresh rate in milliseconds
         self.initSerialConnection() # Initialize serial connection with Arduino
+
 
     def initSerialConnection(self):
             try:
@@ -104,23 +138,45 @@ class MainWindow(QMainWindow):
                 self.logToTerminal("> Serial connection established.")
             except serial.SerialException as e:
                 self.logToTerminal(f"> Error connecting to Arduino: {e}", messageType="error")
+    
+    def exportToCSV(self):
+        filePath = '/Users/summerboltz/Desktop/GUI Testing/HPData.csv' 
+        with open(filePath, 'w', newline='') as file:
+            writer = csv.writer(file)
+            # Write the project details
+            writer.writerow(['Project Number', self.projectNumberInput.text()])
+            writer.writerow(['Client Name', self.clientNameInput.text()])
+            writer.writerow(['Date', self.dateInput.text()])
+            writer.writerow([])  # Add an empty row for spacing
+            # Write the table headers
+            headers = [self.tableWidget.horizontalHeaderItem(i).text() for i in range(self.tableWidget.columnCount())]
+            writer.writerow(headers)
+            # Write the data
+            for row in range(self.tableWidget.rowCount()):
+                row_data = []
+                for column in range(self.tableWidget.columnCount()):
+                    item = self.tableWidget.item(row, column)
+                    # Ensure the item exists before trying to access its text
+                    if item is not None:
+                        row_data.append(item.text())
+                    else:
+                        row_data.append('')
+                writer.writerow(row_data)
+        self.logToTerminal("> Data exported to CSV successfully.")
 
     # Formatting: logo and setting up controls
     def setupUI(self):
         self.setFont(QFont("Verdana", 12))
-        mainLayout = QVBoxLayout()
         tabWidget = QTabWidget()
 
-        self.logoLabel = QLabel() # Logo set-up
-        logoPixmap = QPixmap("Arduino Controller.png")
+        # Logo Setup
+        self.logoLabel = QLabel()
+        logoPixmap = QPixmap("/Users/summerboltz/Desktop/GUI Testing/Arduino Controller.png")
         scaledLogoPixmap = logoPixmap.scaled(500, 300, Qt.KeepAspectRatio)
         self.logoLabel.setPixmap(scaledLogoPixmap)
         self.logoLabel.setAlignment(Qt.AlignCenter)
 
-        self.setCentralWidget(QWidget())
-        self.centralWidget().setLayout(mainLayout)
-
-        # Create the first tab for existing controls
+        # Controls Tab
         controlsTab = QWidget()
         controlsLayout = QVBoxLayout()
         controlsLayout.addWidget(self.logoLabel)
@@ -132,14 +188,74 @@ class MainWindow(QMainWindow):
         controlsLayout.addWidget(self.terminal, 1)  # Give terminal some stretch factor
         controlsTab.setLayout(controlsLayout)
 
-        # Create the second tab for the spreadsheet
+        # Data Spreadsheet Tab
         spreadsheetTab = QWidget()
-        spreadsheetLayout = QVBoxLayout()
-        self.tableWidget = QTableWidget()
-        self.tableWidget.setColumnCount(4)  # For Temperature, Resistance, Voltage, Flow Rate
-        self.tableWidget.setHorizontalHeaderLabels(["Temperature", "Resistance", "Voltage", "Flow Rate"])
+        spreadsheetLayout = QHBoxLayout()  # Changed to QHBoxLayout to place table and graph side by side
 
-        # Set stylesheet for the table headers
+        # Frame for the table
+        tableFrame = QFrame()
+        tableLayout = QVBoxLayout()
+        tableFrame.setLayout(tableLayout)
+
+        # Frame for the graph
+        graphFrame = QFrame()
+        graphLayout = QVBoxLayout()
+        graphFrame.setLayout(graphLayout)
+        graphFrame.setMaximumHeight(400)  # Adjust this value as needed
+
+
+        # Header Section for Spreadsheet Tab
+        headerLayout = QHBoxLayout()
+        self.projectNumberInput = QLineEdit()
+        self.projectNumberInput.setPlaceholderText("Project Number")
+        self.clientNameInput = QLineEdit()
+        self.clientNameInput.setPlaceholderText("Client Name")
+        self.dateInput = QLineEdit()
+        self.dateInput.setPlaceholderText("Date (YYYY-MM-DD)")
+        self.exportCSVButton = QPushButton("Export to CSV")
+        self.exportCSVButton.clicked.connect(self.exportToCSV)
+
+        # Adding widgets to the header layout
+        headerLayout.addWidget(self.projectNumberInput)
+        headerLayout.addWidget(self.clientNameInput)
+        headerLayout.addWidget(self.dateInput)
+        headerLayout.addWidget(self.exportCSVButton)
+        
+        # Add the header section to the table layout
+        tableLayout.addLayout(headerLayout)
+
+        # Table Widget for Spreadsheet Tab
+        self.tableWidget = QTableWidget()
+        self.tableWidget.setColumnCount(4)  # Columns for Temperature, Resistance, Voltage, Flow Rate
+        self.tableWidget.setHorizontalHeaderLabels(["Temperature", "Resistance", "Voltage", "Flow Rate"])
+        
+        # Adding the tableWidget to the table layout
+        tableLayout.addWidget(self.tableWidget)
+
+        # Graph setup
+        self.graphFigure = Figure()
+        self.graphCanvas = FigureCanvas(self.graphFigure)
+
+        # Now adding both frames to the spreadsheetLayout to arrange them side by side
+        spreadsheetLayout.addWidget(tableFrame)
+        spreadsheetLayout.addWidget(graphFrame)
+
+        spreadsheetTab.setLayout(spreadsheetLayout) 
+        self.graphFigure.patch.set_facecolor('#282C34')  # Background color to match One Dark Pro theme
+        self.graphCanvas = FigureCanvas(self.graphFigure)
+        self.ax = self.graphFigure.add_subplot(111)
+        self.ax.set_facecolor('#282C34')  # Graph background color
+        self.ax.tick_params(axis='x', colors='#ABB2BF')  # Adjust to match theme
+        self.ax.tick_params(axis='y', colors='#ABB2BF')
+        self.ax.spines['bottom'].set_color('#ABB2BF')
+        self.ax.spines['top'].set_color('#ABB2BF') 
+        self.ax.spines['right'].set_color('#ABB2BF')
+        self.ax.spines['left'].set_color('#ABB2BF')
+        self.ax.xaxis.label.set_color('#ABB2BF')
+        self.ax.yaxis.label.set_color('#ABB2BF')
+        self.ax.title.set_color('#ABB2BF')
+
+        # Apply the stylesheet for One Dark Pro theme consistency
         self.tableWidget.setStyleSheet("""
             QTableWidget {
                 border: none;
@@ -160,35 +276,25 @@ class MainWindow(QMainWindow):
                 font-size: 12pt;
                 font-family: 'Verdana';
             }
-            QScrollBar:vertical {
-                border: none;
-                background-color: #282C34;
-                width: 14px;
-                margin: 15px 0 15px 0;
-                border-radius: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #3B4048;
-                min-height: 30px;
-                border-radius: 7px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                background: none;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
         """)
 
-        spreadsheetLayout.addWidget(self.tableWidget)
-        spreadsheetTab.setLayout(spreadsheetLayout)
+        tableLayout.addWidget(self.tableWidget)
+        spreadsheetTab.setLayout(spreadsheetLayout)  # Set the layout for the spreadsheet tab
+        graphLayout.addWidget(self.graphCanvas)
 
-        # Add tabs to the QTabWidget
-        tabWidget.addTab(controlsTab, "Controls")
+        # Add tabs to the TabWidget
+        tabWidget.addTab(controlsTab, "Controls Monitor")
         tabWidget.addTab(spreadsheetTab, "Data Spreadsheet")
 
-        # Set the QTabWidget as the central widget
+        # Set the TabWidget as the central widget
         self.setCentralWidget(tabWidget)
+        spreadsheetLayout.addWidget(tableFrame)
+        spreadsheetLayout.addWidget(graphFrame)
+
+        spreadsheetTab.setLayout(spreadsheetLayout) 
+
+        # Call updateGraph to refresh the graph with the new data
+        self.updateGraph()
 
     def addToSpreadsheet(self, temperature, resistance, voltage, flowRate):
         rowPosition = self.tableWidget.rowCount()
@@ -334,37 +440,66 @@ class MainWindow(QMainWindow):
         newValue = currentValue + increment
         lineEdit.setText(f"{newValue:.1f}" if increment < 1 else f"{newValue}")
 
+    def addToSpreadsheet(self, temperature, resistance, voltage, flowRate):
+        rowPosition = self.tableWidget.rowCount()
+        self.tableWidget.insertRow(rowPosition)
+
+        # Create QTableWidgetItem for each piece of data
+        tempItem = QTableWidgetItem(str(temperature))
+        resItem = QTableWidgetItem(str(resistance))
+        voltItem = QTableWidgetItem(str(voltage))
+        flowRateItem = QTableWidgetItem(str(flowRate))
+
+        # Set items in the new row
+        self.tableWidget.setItem(rowPosition, 0, tempItem)
+        self.tableWidget.setItem(rowPosition, 1, resItem)
+        self.tableWidget.setItem(rowPosition, 2, voltItem)
+        self.tableWidget.setItem(rowPosition, 3, flowRateItem)
+
+
     def updateDisplay(self):
         try:
             if self.arduinoSerial and self.arduinoSerial.in_waiting:
                 serialData = self.arduinoSerial.readline().decode('utf-8').strip()
                 print(f"Received data: {serialData}")  # Debug print
                 dataFields = serialData.split(',')
-                # Initialize variables
-                temperature = resistance = voltage = flowRate = "N/A"
+                currentTime = time.time()  # Get the current time once for this batch of data
+                temperature = resistance = voltage = flowRate = None  # Initialize as None for clarity
+
                 for field in dataFields:
                     try:
                         key, value = field.split(':', 1)
-                        print(f"Key: {key}, Value: {value}")  # Debug print
                         if key.strip() == 'Temp':
                             self.temperatureLabel.setText(f"{value}°C")
-                            temperature = value
+                            temperature = float(value)
                         elif key.strip() == 'Res':
                             self.resistanceLabel.setText(f"{value}Ω")
-                            resistance = value
+                            resistance = float(value)  # Assuming you want to plot or use this later
                         elif key.strip() == 'Volt':
                             self.dacVoltageLabel.setText(f"{value}V")
-                            voltage = value
+                            voltage = float(value)  # Assuming you want to plot or use this later
                         elif key.strip() == 'Flow':
                             self.flowRateLabel.setText(f"{value}L/s")
-                            flowRate = value
+                            flowRate = float(value)
+
                     except ValueError as ve:
                         print(f"Error parsing field: {field}. Error: {ve}")
-                # After updating labels, add to spreadsheet
-                self.addToSpreadsheet(temperature, resistance, voltage, flowRate)
+
+                # Ensure there's valid temperature and flowRate data before appending
+                if temperature is not None and flowRate is not None:
+                    self.time_data.append(currentTime)
+                    self.temperature_data.append(temperature)
+                    self.flow_rate_data.append(flowRate)
+                    self.updateGraph()  # Update the graph with new data
+                    self.addToSpreadsheet(temperature, resistance, voltage, flowRate)
+
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
 
+    def handleNewData(self, time, temperature, flowRate):
+        self.time_data.append(time)
+        self.temperature_data.append(temperature)
+        self.flow_rate_data.append(flowRate)
 
     def updateSettings(self):
         temp = self.targetTempInput.text()
@@ -412,7 +547,7 @@ class MainWindow(QMainWindow):
             self.timer.start(1000)  # Adjust the interval as necessary
             self.logToTerminal("> Timer restarted.")
 
-        self.logToTerminal("> System re-initialized.")
+        self.logToTerminal("> System (re-)initialized.")
 
         # Enable the Update Settings and Stop buttons
         self.updateButton.setEnabled(True)
@@ -435,9 +570,42 @@ class MainWindow(QMainWindow):
         # Append the formatted message to the terminal
         self.terminal.appendHtml(formattedMessage)
 
+    def updateGraph(self):
+        if not self.time_data:  # Check if there's data to plot
+            return
+
+        self.ax.clear()  # Clear previous data
+
+        # Plot temperature vs. time
+        self.ax.plot(self.time_data, self.temperature_data, label='Temperature (°C)', color='#E06C75', linewidth=2)
+        # Plot flow rate vs. time on the same graph
+        self.ax.plot(self.time_data, self.flow_rate_data, label='Flow Rate (L/s)', color='#61AFEF', linewidth=2)
+
+        # Set the face color to match the One Dark Pro theme
+        self.ax.set_facecolor('#282C34')
+
+        # Update tick parameters and spines to match the theme color
+        self.ax.tick_params(axis='x', colors='#ABB2BF')
+        self.ax.tick_params(axis='y', colors='#ABB2BF')
+        for spine in self.ax.spines.values():
+            spine.set_color('#ABB2BF')
+
+        # Update axis labels and title
+        self.ax.set_xlabel('Time', color='#ABB2BF')
+        self.ax.set_ylabel('Values', color='#ABB2BF')
+        self.ax.set_title('Temperature and Flow Rate over Time', color='#ABB2BF')
+
+        # Show legend
+        self.ax.legend(facecolor='#282C34', edgecolor='#282C34')
+
+        # Redraw the graph with the new data
+        self.graphCanvas.draw()
+
+
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     applyOneDarkProTheme(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
+                                                   

@@ -2,7 +2,7 @@ import time
 import serial
 import random
 
-port = '/dev/ttys035'  # Replace with the correct port for your virtual serial port
+port = '/dev/ttys073'  # Replace with the correct port for your virtual serial port
 baud_rate = 9600
 
 def mock_arduino():
@@ -15,8 +15,11 @@ def mock_arduino():
             voltage = round(random.uniform(0, 5), 2)
             flow_rate = round(random.uniform(0, 1), 2)
             
-            # Send a formatted string back to the GUI
-            response = f"Temp:{temperature},Res:{resistance},Volt:{voltage},Flow:{flow_rate}\n"
+            # Include a timestamp
+            timestamp = round(time.time(), 2)  # You could also format this as a human-readable string
+            
+            # Send a formatted string back to the GUI, now including the timestamp
+            response = f"Time:{timestamp},Temp:{temperature},Res:{resistance},Volt:{voltage},Flow:{flow_rate}\n"
             ser.write(response.encode('utf-8'))
             print(f"Sent mock data: {response.strip()}")
             
