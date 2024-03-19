@@ -1,108 +1,143 @@
 #include <Adafruit_MAX31865.h> // PT100 library
-#include <Wire.h>  // Wire library for I2C
-#include <RTClib.h>  // RTC library
-#include "DFRobot_GP8XXX.h" // Updated DAC library
+#include <Wire.h>  // Wire library for I2C communication
+#include <RTClib.h>  // Real Time Clock library
+#include "DFRobot_GP8XXX.h" // Digital-to-Analog Converter (DAC) library
 
-Adafruit_MAX31865 max = Adafruit_MAX31865(53);  // CS pin on Arduino
-RTC_DS3231 rtc;  // Create an RTC object
-DFRobot_GP8403 dac(DFGP8XXX_I2C_DEVICEADDR, RESOLUTION_12_BIT);
+// Initialize the MAX31865 RTD sensor, RTC, and DAC with their respective settings
+Adafruit_MAX31865 max = Adafruit_MAX31865(53); // CS pin for MAX31865
+RTC_DS3231 rtc; // Real Time Clock (RTC) object
+DFRobot_GP8403 dac(DFGP8XXX_I2C_DEVICEADDR, RESOLUTION_12_BIT); // DAC object
 
-const int heatingPin = 5; // Digital pin for heating control
-float flowRate = 0.0; // The calculated flow rate
-float targetTemperature = 25.0; // Default target temperature
-float tolerance = 0.2; // Temperature tolerance
-float desiredVoltage = 5; // Initial voltage
+// Define pin for heating control and initialize variables for temperature, flow rate, etc.
+const int heatingPin = 5; // Digital pin for heating control relay or transistor
+float flowRate = 0.0; // Flow rate variable
+float targetTemperature = 25.0; // Default target temperature in Celsius
+float tolerance = 0.2; // Temperature tolerance in Celsius
+float desiredVoltage = 0.0; // Desired voltage to be set on the DAC
+float dacVoltage = 0.0;
 
 void setup() {
-  Serial.begin(9600); // Begin Serial communication
-  delay(3000); // Delay for 3s before continuing
-  
-  max.begin(MAX31865_4WIRE); // Set up PT100 sensor- 4 wire
+  Serial.begin(9600); // Begin Serial communication at 9600 baud rate
+  while (!Serial) { ; } // Wait for the serial port to connect. Needed for Leonardo only.
+
+  max.begin(MAX31865_4WIRE); // Initialize the MAX31865 RTD sensor in 4-wire configuration
   Serial.println("PT100 sensor initialized.");
 
-  if (!rtc.begin()) {
+  if (!rtc.begin()) { // Check if the RTC is connected and working
     Serial.println("Couldn't find RTC");
     while (1); // Infinite loop if RTC not found
-  } else {
-    Serial.println("RTC initialized successfully.");
+  }
+  if (rtc.lostPower()) { // Check if the RTC lost power and needs its time reset
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // Set RTC to the date & time this sketch was compiled
   }
 
-  if (rtc.lostPower()) {
-    // If the RTC lost power, let's set the time!
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
-  
-  if (dac.begin() == 0) {
+  if (dac.begin() == 0) { // Initialize the DAC
     Serial.println("DAC initialized successfully.");
-    dac.setDACOutRange(DFRobot_GP8XXX::eOutputRange10V); // Set to 0-10V range, adjust if needed
+    dac.setDACOutRange(DFRobot_GP8XXX::eOutputRange10V); // Set DAC output range (0 to 10V for example)
   } else {
     Serial.println("Couldn't initialize DAC. Check wiring!");
-    while (1);
+    while (1); // Infinite loop if DAC not found
   }
-  pinMode(heatingPin, OUTPUT); // Set the heating control pin as output
+
+  pinMode(heatingPin, OUTPUT); // Set the heating control pin as an output
 }
 
 void loop() {
-  float temperature = readTemperature(); // Read and calculate temperature from PT100
-  float resistance = calculateResistance(); // Calculate resistance from RTD reading
-  float voltage = readAnalogVoltage(); // Read and convert voltage from analog pin
+  if (Serial.available() > 0) { // Check if data is available to read from the serial port
+    String command = Serial.readStringUntil('\n'); // Read the incoming string until newline
+    processSerialCommand(command); // Process the received serial command
+  }
+
+  float temperature = readTemperature(); // Read the current temperature from the RTD sensor
+  float resistance = calculateResistance(); // Calculate resistance based on RTD reading (optional)
+  float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor (optional)
+
+  flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage (optional)
   
-  // DAC voltage setting logic
-  setDACVoltage(desiredVoltage);
+  setDACVoltage(desiredVoltage); // Update the DAC output voltage
+  controlHeating(temperature, targetTemperature, tolerance); // Control heating element based on temperature
 
-  // Adjust thermostat control logic based on targetTemperature and tolerance
-  controlHeating(temperature);
+  sendSerialData(temperature, resistance, desiredVoltage, sensorVoltage, flowRate); // Send data over serial
 
-  // Send temperature, resistance, voltage, and flow rate data to the GUI via serial communication
-  sendSerialData(temperature, resistance, voltage, flowRate);
-
-  delay(1000); // Add a delay to control the update rate
+  delay(1000); // Delay for a second before repeating the loop
 }
 
+// Function to read temperature from the RTD sensor
 float readTemperature() {
   uint16_t rtd = max.readRTD();
   float ratio = rtd / 32768.0;
-  float resistance = (ratio * 430);
-  float R0 = 100.0;
-  float A = 3.9083e-3;
-  float B = -5.775e-7;
-  float temperature = (-R0 * A + sqrt(R0*R0*A*A - 4*R0*B*(R0 - resistance))) / (2*R0*B);
+  float resistance = ratio * 430; // Assuming a 430 Ohm reference resistor
+  float temperature = max.temperature(100, 430); // Calculate temperature (100 Ohm at 0°C, 430 Ohm reference resistor)
   return temperature;
 }
 
+// Function to calculate resistance (Optional if you need direct resistance values)
 float calculateResistance() {
   uint16_t rtd = max.readRTD();
   float ratio = rtd / 32768.0;
-  return (ratio * 430);
+  return ratio * 430; // Assuming a 430 Ohm reference resistor
 }
 
-float readAnalogVoltage() {
-  int sensorValue = analogRead(A0);
-  return sensorValue * (5.0 / 1023.0); // Assuming a reference voltage of 5V
+// Function to read analog voltage
+float readAnalogVoltage(int pin) {
+  int sensorValue = analogRead(pin);
+  float voltage = sensorValue * (5.0 / 1023.0); // Convert to voltage (assuming 5V reference)
+  return voltage;
 }
 
+// Function to calculate flow rate based on sensor voltage (Example function, implement according to your sensor)
+float calculateFlowRate(float sensorVoltage) {
+  flowRate = sensorVoltage * (0.35 / 5.0);
+  return flowRate;
+}
+
+// Function to set DAC voltage
 void setDACVoltage(float voltage) {
-  uint16_t dacValue = static_cast<uint16_t>((voltage / 10.0) * 4095);
-  dac.setDACOutVoltage(dacValue, 0); // Apply the updated voltage to channel 0
+  uint16_t dacValue = (uint16_t)((voltage / 10.0) * 4095); // Convert voltage to DAC value (assuming 10V max)
+  dac.setDACOutVoltage(dacValue, 0); // Set voltage on DAC channel 0
+  dacVoltage = voltage; // Update dacVoltage to reflect the actual voltage being set.
 }
 
-void controlHeating(float temperature) {
-  if (temperature < targetTemperature - tolerance) {
-    digitalWrite(heatingPin, HIGH); // Turn on heating
-  } else if (temperature > targetTemperature + tolerance) {
-    digitalWrite(heatingPin, LOW); // Ensure heating is off
-  } else {
-    digitalWrite(heatingPin, LOW); // Ensure heating is off
+// Function to control heating based on the current and target temperature
+void controlHeating(float currentTemperature, float targetTemp, float tempTolerance) {
+  if (currentTemperature < targetTemp - tempTolerance) {
+    digitalWrite(heatingPin, HIGH); // Turn on heating element
+  } else if (currentTemperature > targetTemp + tempTolerance) {
+    digitalWrite(heatingPin, LOW); // Turn off heating element
   }
 }
 
-void sendSerialData(float temperature, float resistance, float voltage, float flowRate) {
+// Function to send collected data over serial
+void sendSerialData(float temperature, float resistance, float dacVoltage, float sensorVoltage, float flowRate) {
+  // Ensure the correct variables are being sent
   Serial.print("Temp:");
   Serial.print(temperature);
-  Serial.print(",Res:");
+  Serial.print(", Res:");
   Serial.print(resistance);
-  Serial.print(",Volt:");
-  Serial.print(voltage);
-  Serial.print(",Flow:");
-  Serial.println(flowRate);
+  Serial.print(", DACVolt:");
+  Serial.print(dacVoltage); // Ensure this is the DAC voltage
+  Serial.print(", SensorVolt:");
+  Serial.print(sensorVoltage);
+  Serial.print(", FlowRate:");
+  Serial.println(flowRate); // Ensure this is the flow rate
+}
+
+// Function to process commands received from the serial port
+void processSerialCommand(String command) {
+  if (command.startsWith("setTemp ")) {
+    targetTemperature = command.substring(8).toFloat();
+    Serial.print("New target temperature: ");
+    Serial.println(targetTemperature);
+  } else if (command.startsWith("setTolerance ")) {
+    tolerance = command.substring(13).toFloat();
+    Serial.print("New tolerance: ");
+    Serial.println(tolerance);
+  } else if (command.startsWith("setVoltage ")) {
+    desiredVoltage = command.substring(11).toFloat();
+    Serial.print("New DAC voltage: ");
+    Serial.println(desiredVoltage);
+    setDACVoltage(desiredVoltage); // Update the DAC voltage immediately
+  } else {
+    Serial.println("Unknown command");
+  }
 }
