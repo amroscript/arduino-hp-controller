@@ -1,5 +1,5 @@
 # arduino-hp-controller for heat pump systems
-This repository consists of an Arduino-driven controller is designed to monitor and control heat-pump parameters in real-time, offering an interface for initialization, settings updates, and operations management with feedback through a terminal display and export data.
+This repository consists of an Arduino-driven controller is designed to monitor and control heat-pump parameters in real-time, offering an interface for initialization, settings updates, and operations management with feedback through a terminal display and with a functionality to export data.
 
 ## Installation 
 
