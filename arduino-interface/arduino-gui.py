@@ -15,7 +15,7 @@ from PyQt5.QtCore import QTimer, Qt
 
 
 # Arduino serial connection set-up
-ARDUINO_PORT = 'COM3'# Change based on port
+ARDUINO_PORT = 'COM3'# Hard-coded 
 BAUD_RATE = 9600
 
 # User-interface theme customization
@@ -80,6 +80,12 @@ def applyOneDarkProTheme(app):
     }
     QPushButton#stopButton:hover {
         background-color: #EF7A85; /* Lighter shade for hover on stop button */
+    }
+    QTabBar::tab {
+        min-width: 120px; 
+        font-size: 10pt; /* Set the desired font size */
+        font-family: 'Verdana'; 
+        padding: 10px; 
     }
     QGroupBox {
         border: 2px solid #3B4048; 
@@ -201,35 +207,45 @@ class MainWindow(QtWidgets.QMainWindow):
         graphFrame = QFrame()
         graphLayout = QVBoxLayout()
         graphFrame.setLayout(graphLayout)
-        graphFrame.setMaximumHeight(400)  # Adjust this value as needed
-
+        graphFrame.setMaximumWidth(800)  # Adjust this value as needed
 
         # Header Section for Spreadsheet Tab
         headerLayout = QHBoxLayout()
         self.projectNumberInput = QLineEdit()
         self.projectNumberInput.setPlaceholderText("Project Number")
+        self.projectNumberInput.setMaximumWidth(300)  # Adjust the maximum width as desired
         self.clientNameInput = QLineEdit()
         self.clientNameInput.setPlaceholderText("Client Name")
+        self.clientNameInput.setMaximumWidth(300)  # Adjust the maximum width as desired
         self.dateInput = QLineEdit()
         self.dateInput.setPlaceholderText("Date (YYYY-MM-DD)")
+        self.dateInput.setMaximumWidth(300)  # Adjust the maximum width as desired
         self.exportCSVButton = QPushButton("Export to CSV")
         self.exportCSVButton.clicked.connect(self.exportToCSV)
-    
+        self.exportCSVButton.setStyleSheet("font-size: 10pt;")
 
         # Adding widgets to the header layout
         headerLayout.addWidget(self.projectNumberInput)
         headerLayout.addWidget(self.clientNameInput)
         headerLayout.addWidget(self.dateInput)
         headerLayout.addWidget(self.exportCSVButton)
-        
+
         # Add the header section to the table layout
         tableLayout.addLayout(headerLayout)
 
         # Table Widget for Spreadsheet Tab
         self.tableWidget = QTableWidget()
-        self.tableWidget.setColumnCount(5)  # Columns for Temperature, Resistance, Voltage, Flow Rate
-        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "Voltage", "Flow Rate"])
-        
+        self.tableWidget.setColumnCount(6)  # Columns for Temperature, Resistance, Voltage, Flow Rate
+        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "DAC Voltage", "Sens Voltage", "Flow Rate"])
+
+        # Set the width of each column in the table
+        self.tableWidget.setColumnWidth(0, 120)  # Time column width
+        self.tableWidget.setColumnWidth(1, 120)  # Temperature column width
+        self.tableWidget.setColumnWidth(2, 120)  # Resistance column width
+        self.tableWidget.setColumnWidth(3, 120)  # DAC Voltage column width
+        self.tableWidget.setColumnWidth(4, 120)  # Sensor Voltage column width
+        self.tableWidget.setColumnWidth(5, 120)  # Flow Rate column width
+
         # Adding the tableWidget to the table layout
         tableLayout.addWidget(self.tableWidget)
 
@@ -265,6 +281,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 gridline-color: #3B4048;
                 selection-background-color: #3E4451;
                 selection-color: #ABB2BF;
+                font-size: 12pt; /* Increase font size */
             }
             QTableWidget::item {
                 padding: 5px;
@@ -274,7 +291,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 color: #ABB2BF;
                 padding: 5px;
                 border: 1px solid #282C34;
-                font-size: 10pt;
+                font-size: 11pt;
                 font-family: 'Verdana';
             }
         """)
@@ -311,7 +328,7 @@ class MainWindow(QtWidgets.QMainWindow):
         1. Click the <span style='color: #98C379;'>initialize</span> button to activate all Arduino components.<br>
         2. The control parameters are only updated when the <span style='color: #61AFEF;'>update settings</span> button is clicked.<br>
         3. The <span style='color: #E06C75;'>stop</span> button will halt all operations.<br><br>
-        For further clarification please consult documentation.
+        For further clarification please consult the github repository documentation: https://github.com/amroscript/arduino-hp-controller.
         </p>
         """)
         instructionsLabel.setFont(QFont("Verdana", 12))
@@ -331,26 +348,30 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Right side layout for real-time data
         dataLayout = QGridLayout()
-        self.temperatureLabel = QLabel("Temperature: 0°C")
-        self.resistanceLabel = QLabel("Resistance: 0Ω")
-        self.dacVoltageLabel = QLabel("DAC Voltage: 0V")
-        self.flowRateLabel = QLabel("Flow Rate: 0L/s")
+        self.temperatureLabel = QLabel("0°C")
+        self.resistanceLabel = QLabel("0Ω")
+        self.dacVoltageLabel = QLabel("0V")
+        self.sensorVoltageLabel = QLabel("0V")
+        self.flowRateLabel = QLabel("0L/s")
 
         bold_font = QFont()
         bold_font.setBold(True)
         self.temperatureLabel.setFont(bold_font)
         self.resistanceLabel.setFont(bold_font)
         self.dacVoltageLabel.setFont(bold_font)
+        self.sensorVoltageLabel.setFont(bold_font)
         self.flowRateLabel.setFont(bold_font)
 
-        dataLayout.addWidget(QLabel("Temperature:"), 1, 0)
+        dataLayout.addWidget(QLabel("↻ Temperature:"), 1, 0)
         dataLayout.addWidget(self.temperatureLabel, 1, 1)
         dataLayout.addWidget(QLabel("Resistance:"), 0, 0)
         dataLayout.addWidget(self.resistanceLabel, 0, 1)
-        dataLayout.addWidget(QLabel("DAC Voltage:"), 3, 0)
-        dataLayout.addWidget(self.dacVoltageLabel, 3, 1)
-        dataLayout.addWidget(QLabel("Flow Rate:"), 2, 0)
-        dataLayout.addWidget(self.flowRateLabel, 2, 1)
+        dataLayout.addWidget(QLabel("Sensor Voltage:"), 2, 0)
+        dataLayout.addWidget(self.sensorVoltageLabel, 2, 1)
+        dataLayout.addWidget(QLabel("↻ Flow Rate:"), 3, 0)
+        dataLayout.addWidget(self.flowRateLabel, 3, 1)
+        dataLayout.addWidget(QLabel("⇈ DAC Voltage:"), 4, 0)
+        dataLayout.addWidget(self.dacVoltageLabel, 4, 1)
         dataContainer = QWidget()
         dataContainer.setLayout(dataLayout)
 
@@ -368,29 +389,35 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.targetTempInput = QLineEdit("25")
         self.toleranceInput = QLineEdit("0.1")
-        self.dacVoltageInput = QLineEdit("2.5")
+        self.dacVoltageInput = QLineEdit("0.0")
 
         self.addControlWithButtons(layout, "Target Temperature (°C):", self.targetTempInput, 1)
         self.addControlWithButtons(layout, "Temperature Tolerance (±°C):", self.toleranceInput, 0.1)
         self.addControlWithButtons(layout, "DAC Voltage Output (V):", self.dacVoltageInput, 1)
 
+        # Define a custom font for the buttons
+        buttonFont = QFont("Verdana", 10)  # Increase the font size as desired
+
         self.updateButton = QPushButton("Update Settings")
+        self.updateButton.setFont(buttonFont)  # Set the custom font
         self.updateButton.setObjectName("updateButton")
         self.updateButton.clicked.connect(self.updateSettings)
 
         self.stopButton = QPushButton("Stop")
+        self.stopButton.setFont(buttonFont)  # Set the custom font
         self.stopButton.setObjectName("stopButton")
         self.stopButton.clicked.connect(self.stopOperations)
+
+        self.initButton = QPushButton("Initialize")
+        self.initButton.setFont(buttonFont)  # Set the custom font
+        self.initButton.setObjectName("initButton")
+        self.initButton.clicked.connect(self.initButtonClicked)
 
         self.updateButton.setEnabled(False)  # Initially disabled
         self.stopButton.setEnabled(False)  # Initially disabled
 
         layout.addWidget(self.updateButton, 4, 0, 1, 2)
         layout.addWidget(self.stopButton, 5, 0, 1, 2)
-
-        self.initButton = QPushButton("Initialize")
-        self.initButton.setObjectName("initButton")  # Use this name in your stylesheet if you want to apply styles
-        self.initButton.clicked.connect(self.initButtonClicked)
 
         self.initButton.setMinimumHeight(75)  # Set a minimum height for the button.
         layout.addWidget(self.initButton, 4, 2, 2, 1)
@@ -433,14 +460,15 @@ class MainWindow(QtWidgets.QMainWindow):
         newValue = currentValue + increment
         lineEdit.setText(f"{newValue:.1f}" if increment < 1 else f"{newValue}")
 
-    def addToSpreadsheet(self, timeData, temperature, resistance, voltage, flowRate):
+    def addToSpreadsheet(self, timeData, temperature, resistance, dacVoltage, voltage, flowRate):
         rowPosition = self.tableWidget.rowCount()
         self.tableWidget.insertRow(rowPosition)
         self.tableWidget.setItem(rowPosition, 0, QTableWidgetItem(timeData))
         self.tableWidget.setItem(rowPosition, 1, QTableWidgetItem(str(temperature)))
         self.tableWidget.setItem(rowPosition, 2, QTableWidgetItem(str(resistance)))
-        self.tableWidget.setItem(rowPosition, 3, QTableWidgetItem(str(voltage)))
-        self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(str(flowRate)))
+        self.tableWidget.setItem(rowPosition, 3, QTableWidgetItem(str(dacVoltage)))
+        self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(str(voltage)))
+        self.tableWidget.setItem(rowPosition, 5, QTableWidgetItem(str(flowRate)))
 
     def updateDisplay(self):
         try:
@@ -449,7 +477,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 print(f"Received data: {serialData}")  # Debug print
                 dataFields = serialData.split(',')
                 currentTime = time.strftime("%H:%M:%S", time.localtime())  # Format current time as a string
-                temperature = resistance = voltage = flowRate = None  # Initialize as None for clarity
+                temperature = resistance = dacVoltage = sensorVoltage = flowRate = None  # Initialize as None for clarity
 
                 for field in dataFields:
                     try:
@@ -460,10 +488,13 @@ class MainWindow(QtWidgets.QMainWindow):
                         elif key.strip() == 'Res':
                             self.resistanceLabel.setText(f"{value}Ω")
                             resistance = float(value)  # Assuming you want to plot or use this later
-                        elif key.strip() == 'Volt':
+                        elif key.strip() == 'DACVolt':
                             self.dacVoltageLabel.setText(f"{value}V")
-                            voltage = float(value)  # Assuming you want to plot or use this later
-                        elif key.strip() == 'Flow':
+                            dacVoltage = float(value)
+                        elif key.strip() == 'SensorVolt':
+                            self.sensorVoltageLabel.setText(f"{value}V")
+                            sensorVoltage = float(value)  # Assuming you want to plot or use this later
+                        elif key.strip() == 'FlowRate':
                             self.flowRateLabel.setText(f"{value}L/s")
                             flowRate = float(value)
                     except ValueError as ve:
@@ -475,7 +506,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.temperature_data.append(temperature)
                     self.flow_rate_data.append(flowRate)
                     self.updateGraph()  # Update the graph with new data
-                    self.addToSpreadsheet(currentTime, temperature, resistance, voltage, flowRate)  # Pass currentTime as the first argument
+                    self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)  # Pass currentTime as the first argument
 
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
@@ -487,18 +518,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self.flow_rate_data.append(flowRate)
 
     def updateSettings(self):
+        # Retrieve the values from the input fields
         temp = self.targetTempInput.text()
         tol = self.toleranceInput.text()
         dacV = self.dacVoltageInput.text()
-        # Format the settings into a string. Example: "SET,Temp=25,Tol=0.1,Volt=2.5"
-        settingsStr = f"SET,Temp={temp},Tol={tol},Volt={dacV}\n"
 
-        # Check if serial connection is established
+        # Construct command strings for each setting
+        tempCommand = f"setTemp {temp}\n"
+        tolCommand = f"setTolerance {tol}\n"
+        dacVCommand = f"setVoltage {dacV}\n"
+
+        # Check if the serial connection is established
         if self.arduinoSerial and self.arduinoSerial.isOpen():
             try:
-                # Send the settings string to the Arduino
-                self.arduinoSerial.write(settingsStr.encode('utf-8'))
-                self.logToTerminal(f"> Control settings sent: Temp={temp}, Tolerance={tol}, DAC Voltage={dacV}.")
+                # Sending the temperature setting command
+                self.arduinoSerial.write(tempCommand.encode('utf-8'))
+                self.logToTerminal(f"> Temperature setting command sent: {tempCommand.strip()}")
+
+                # Sending the tolerance setting command
+                self.arduinoSerial.write(tolCommand.encode('utf-8'))
+                self.logToTerminal(f"> Tolerance setting command sent: {tolCommand.strip()}")
+
+                # Sending the DAC voltage setting command
+                self.arduinoSerial.write(dacVCommand.encode('utf-8'))
+                self.logToTerminal(f"> DAC Voltage setting command sent: {dacVCommand.strip()}")
             except serial.SerialException as e:
                 self.logToTerminal(f"> Error sending settings to Arduino: {e}", messageType="error")
         else:
@@ -563,29 +606,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Plot temperature vs. time
         self.ax.plot(self.time_data, self.temperature_data, label='Temperature (°C)', color='#E06C75', linewidth=2)
-        # Plot flow rate vs. time on the same graph
-        self.ax.plot(self.time_data, self.flow_rate_data, label='Flow Rate (L/s)', color='#61AFEF', linewidth=2)
+        # Plot flow rate vs. time on a secondary y-axis
+        self.ax2 = self.ax.twinx()  # Create a secondary y-axis
+        self.ax2.plot(self.time_data, self.flow_rate_data, label='Flow Rate (L/s)', color='#61AFEF', linewidth=2)
+        self.ax2.set_ylabel('Flow Rate (L/s)', color='#61AFEF')  # Set label for the secondary y-axis
 
         # Set the face color to match the One Dark Pro theme
         self.ax.set_facecolor('#282C34')
+        self.ax2.set_facecolor('#282C34')  # Set face color for the secondary y-axis
 
         # Update tick parameters and spines to match the theme color
-        self.ax.tick_params(axis='x', colors='#ABB2BF')
-        self.ax.tick_params(axis='y', colors='#ABB2BF')
-        for spine in self.ax.spines.values():
-            spine.set_color('#ABB2BF')
+        for ax in [self.ax, self.ax2]:
+            ax.tick_params(axis='x', colors='#ABB2BF', rotation=90)  # Rotate tick labels by 90 degrees for better readability
+            ax.tick_params(axis='y', colors='#ABB2BF')
+            for spine in ax.spines.values():
+                spine.set_color('#ABB2BF')
 
+        # Adjust the number of ticks on the x-axis (every 10th tick)
+        num_ticks = len(self.time_data)
+        if num_ticks > 10:
+            step = num_ticks // 10
+            self.ax.xaxis.set_ticks(self.time_data[::step])
+        
         # Update axis labels and title
-        self.ax.set_xlabel('Time', color='#ABB2BF')
-        self.ax.set_ylabel('Values', color='#ABB2BF')
-        self.ax.set_title('Temperature and Flow Rate over Time', color='#ABB2BF')
+        self.ax.set_title('Temperature & Flow Rate vs Time', color='#ABB2BF')
 
         # Show legend
-        self.ax.legend(facecolor='#282C34', edgecolor='#282C34')
+        lines, labels = self.ax.get_legend_handles_labels()
+        lines2, labels2 = self.ax2.get_legend_handles_labels()
+        self.ax.legend(lines + lines2, labels + labels2, loc='upper left', facecolor='#282C34', edgecolor='#282C34')
 
         # Redraw the graph with the new data
         self.graphCanvas.draw()
-
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
