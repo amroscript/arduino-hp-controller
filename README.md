@@ -26,7 +26,7 @@ In order to use this package, you should download the Python/Arduino files.
     2. Go to `Sketch` > `Include Library` > `Manage Libraries...`
     3. In the Library Manager, search for each library listed above and install it.
 
-## Documentation
+## Software Documentation
 
 1. If using _mock-testing_ to mimick an arduino environment for the controller:
 
@@ -60,11 +60,79 @@ In order to use this package, you should download the Python/Arduino files.
 
     – **Export Data:** Click the "Export to CSV" button to save the data for offline analysis.
 
-## Image Preview
+## User-interface Preview
 
 ![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/d30b31a8-5c83-4e93-84ea-e2d63217f26b)
 
 ![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/e670c02f-aac0-450f-af79-779538deb5a3)
+
+## Hardware Documentation
+
+**Components Required**
+
+- Arduino Board (Mega 2560): Central processing unit for the controller, managing sensor data readings and actuator responses.
+
+- Adafruit MAX31865 RTD Sensor: Sensor for reading temperatures, essential for monitoring the heat pump performance.
+
+- RTC DS3231 Real-Time Clock Module: Provides accurate timekeeping for data logging and scheduling tasks.
+
+- DFRobot GP8403 DAC Module: Used for controlling analog variables within the system, such as outputting voltage levels.
+
+- Digital Relay Module (optional): For controlling higher power components such as heaters or pumps, based on the Arduino's output signals.
+
+- Wiring and Connectors: Ensure proper connection between the Arduino, sensors, actuators, and other peripherals.
+
+- Power Supply: Adequate power source for the Arduino and all connected hardware components.
+
+Note there are initilization checks within the read-temp.ino script to verify wiring and integration before testing.
+
+**Wiring Overview**
+
+- MAX31865 RTD Sensor:
+
+    VCC to Mega 5V.
+    GND to Mega GND.
+    SDI (MOSI) to Mega pin 51.
+    SDO (MISO) to Mega pin 50.
+    CLK to Mega pin 52.
+    CS to a selectable digital pin, e.g., pin 10.
+    RTD wires connected to the RTD screw terminals.
+
+- DFRobot_GP8XXX DAC:
+
+    VCC to Mega 5V.
+  
+    GND to Mega GND.
+  
+    SCL to Mega pin 21 (also labeled as SCL).
+  
+    SDA to Mega pin 20 (also labeled as SDA).
+  
+    The DAC's analog output to your actuator's control input.
+
+- RTC DS3231:
+
+    VCC to Mega 5V.
+  
+    GND to Mega GND.
+  
+    SCL to Mega pin 21 (also labeled SCL).
+  
+    SDA to Mega pin 20 (also labeled SDA).
+
+- Heating Control (Relay Module):
+
+    VCC (Relay module) to Mega 5V.
+  
+    GND (Relay module) to Mega GND.
+  
+    IN (Relay module) to a digital pin on Mega, e.g., pin 5.
+  
+    Heating element's power circuit connected through the relay.
+
+_Note:_ The Mega 2560 provides multiple ground and voltage pins, so you can easily expand your project with more sensors or actuators.
+The Mega 2560 has a dedicated SPI header close to the digital pins 50 (MISO), 51 (MOSI), and 52 (CLK), which is convenient for SPI devices like the MAX31865.
+The I2C pins (20 for SDA and 21 for SCL) on the Mega are in a different location than on the Uno, so always refer to the Mega's pinout when connecting I2C devices like the DS3231 RTC and the DAC module.
 
 
 
