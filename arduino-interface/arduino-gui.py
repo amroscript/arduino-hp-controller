@@ -1,8 +1,16 @@
-# Library/package set-up for GUI
+#!/usr/bin/env python3.9
+
+"""
+    @Author: Amro Farag
+    Date: March 2024
+    Email: amro.farag@bregroup.com / amrihabfaraj@gmail.com
+"""
+
 import sys
 import serial
 import csv
 import time
+from bamLoadBasedTesting.twoMassModel import CalcParameters
 from matplotlib.backends.backend_qt import MainWindow
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -15,7 +23,7 @@ from PyQt5.QtCore import QTimer, Qt
 
 
 # Arduino serial connection set-up
-ARDUINO_PORT = 'COM3'# Hard-coded 
+ARDUINO_PORT = 'COM3' # Hard-coded 
 BAUD_RATE = 9600
 
 # User-interface theme customization
@@ -137,8 +145,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.start(1000)  # Refresh rate in milliseconds
         self.initSerialConnection() # Initialize serial connection with Arduino
 
+        self.updateButton.setEnabled(False)
+        self.stopButton.setEnabled(False)
+        self.virtualHeaterButton.setEnabled(False)
+        self.ssrHeaterButton.setEnabled(False)
+        self.dacVoltageInput.setEnabled(False)
+        self.targetTempInput.setEnabled(False)
+        self.toleranceInput.setEnabled(False)
+        
 
-    def initSerialConnection(self):
+
+    def initSerialConnection(self): 
             try:
                 self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
                 self.logToTerminal("> Serial connection established.")
@@ -178,7 +195,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Logo Setup
         self.logoLabel = QLabel()
         logoPixmap = QPixmap("Arduino Controller.png")
-        scaledLogoPixmap = logoPixmap.scaled(600, 400, Qt.KeepAspectRatio)
+        scaledLogoPixmap = logoPixmap.scaled(700, 500, Qt.KeepAspectRatio)
         self.logoLabel.setPixmap(scaledLogoPixmap)
         self.logoLabel.setAlignment(Qt.AlignCenter)
 
@@ -222,7 +239,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dateInput.setMaximumWidth(300)  # Adjust the maximum width as desired
         self.exportCSVButton = QPushButton("Export to CSV")
         self.exportCSVButton.clicked.connect(self.exportToCSV)
-        self.exportCSVButton.setStyleSheet("font-size: 10pt;")
+        self.exportCSVButton.setStyleSheet("font-size: 11pt;")
 
         # Adding widgets to the header layout
         headerLayout.addWidget(self.projectNumberInput)
@@ -236,15 +253,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # Table Widget for Spreadsheet Tab
         self.tableWidget = QTableWidget()
         self.tableWidget.setColumnCount(6)  # Columns for Temperature, Resistance, Voltage, Flow Rate
-        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "DAC Voltage", "Sens Voltage", "Flow Rate"])
+        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "DAC Voltage", "Sensor Voltage", "Flow Rate"])
 
         # Set the width of each column in the table
-        self.tableWidget.setColumnWidth(0, 120)  # Time column width
-        self.tableWidget.setColumnWidth(1, 120)  # Temperature column width
-        self.tableWidget.setColumnWidth(2, 120)  # Resistance column width
-        self.tableWidget.setColumnWidth(3, 120)  # DAC Voltage column width
-        self.tableWidget.setColumnWidth(4, 120)  # Sensor Voltage column width
-        self.tableWidget.setColumnWidth(5, 120)  # Flow Rate column width
+        self.tableWidget.setColumnWidth(0, 147.5)  # Time column width
+        self.tableWidget.setColumnWidth(1, 147.5)  # Temperature column width
+        self.tableWidget.setColumnWidth(2, 147.5)  # Resistance column width
+        self.tableWidget.setColumnWidth(3, 147.5)  # DAC Voltage column width
+        self.tableWidget.setColumnWidth(4, 148)  # Sensor Voltage column width
+        self.tableWidget.setColumnWidth(5, 148)  # Flow Rate column width
 
         # Adding the tableWidget to the table layout
         tableLayout.addWidget(self.tableWidget)
@@ -310,6 +327,8 @@ class MainWindow(QtWidgets.QMainWindow):
         spreadsheetLayout.addWidget(graphFrame)
 
         spreadsheetTab.setLayout(spreadsheetLayout) 
+
+        self.applyButtonStyles()
 
         # Call updateGraph to refresh the graph with the new data
         self.updateGraph()
@@ -385,80 +404,212 @@ class MainWindow(QtWidgets.QMainWindow):
     def createControlGroup(self):
         group = QGroupBox("Control Settings")
         group.setFont(QFont("Verdana", 12, QFont.Bold))
+
         layout = QGridLayout(group)
 
+        # Heater Mode Buttons Setup
+        self.heaterButtonGroup = QtWidgets.QButtonGroup(group)  # Group buttons logically
+        self.virtualHeaterButton = QPushButton("Virtual Heater")
+        self.ssrHeaterButton = QPushButton("SSR Heater")
+
+        for btn in [self.virtualHeaterButton, self.ssrHeaterButton]:
+            btn.setCheckable(True)
+            self.heaterButtonGroup.addButton(btn)
+            btn.setMaximumHeight(40)  # Set a fixed height
+
+        self.virtualHeaterButton.setChecked(True)  # Default selection
+
+        # Connect buttons to the toggle function
+        self.virtualHeaterButton.clicked.connect(lambda: self.toggleHeaterMode(True))
+        self.ssrHeaterButton.clicked.connect(lambda: self.toggleHeaterMode(False))
+
+        # Adjust button layout to remove gaps
+        heaterButtonLayout = QHBoxLayout()
+        heaterButtonLayout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        heaterButtonLayout.setSpacing(0)  # Remove spacing
+        heaterButtonLayout.addWidget(self.virtualHeaterButton)
+        heaterButtonLayout.addWidget(self.ssrHeaterButton)
+
+        # Add layout to a container widget for proper alignment
+        buttonContainer = QWidget()
+        buttonContainer.setLayout(heaterButtonLayout)
+        layout.addWidget(QLabel("Toggle Heater Mode:"), 0, 0)
+        layout.addWidget(buttonContainer, 0, 1)
+
+        # Update styling based on the initial state
+        self.updateHeaterButtons(True)
+
+        # Target Temperature Controls
+        layout.addWidget(QLabel("Target Temperature (°C):"), 1, 0)
         self.targetTempInput = QLineEdit("25")
+        layout.addWidget(self.targetTempInput, 1, 1)
+        self.addControlWithButtons(layout, self.targetTempInput, 1, 2)
+
+        # Temperature Tolerance Controls
+        layout.addWidget(QLabel("Temperature Tolerance (±°C):"), 2, 0)
         self.toleranceInput = QLineEdit("0.1")
+        layout.addWidget(self.toleranceInput, 2, 1)
+        self.addControlWithButtons(layout, self.toleranceInput, 2, 2)
+
+        # DAC Voltage Output Controls
+        layout.addWidget(QLabel("DAC Voltage Output (V):"), 3, 0)
         self.dacVoltageInput = QLineEdit("0.0")
+        layout.addWidget(self.dacVoltageInput, 3, 1)
+        self.addControlWithButtons(layout, self.dacVoltageInput, 3, 2)
 
-        self.addControlWithButtons(layout, "Target Temperature (°C):", self.targetTempInput, 1)
-        self.addControlWithButtons(layout, "Temperature Tolerance (±°C):", self.toleranceInput, 0.1)
-        self.addControlWithButtons(layout, "DAC Voltage Output (V):", self.dacVoltageInput, 1)
-
-        # Define a custom font for the buttons
-        buttonFont = QFont("Verdana", 10)  # Increase the font size as desired
-
+        # Initialize, Stop, and Update Settings Buttons
+        self.initButton = QPushButton("Initialize")
+        self.stopButton = QPushButton("Stop")
         self.updateButton = QPushButton("Update Settings")
-        self.updateButton.setFont(buttonFont)  # Set the custom font
-        self.updateButton.setObjectName("updateButton")
+        layout.addWidget(self.initButton, 4, 0, 1, 2)
+        layout.addWidget(self.updateButton, 5, 0, 1, 2)
+        layout.addWidget(self.stopButton, 6, 0, 1, 2)
+        self.initButton.clicked.connect(self.initButtonClicked)
+        self.stopButton.clicked.connect(self.stopOperations)
         self.updateButton.clicked.connect(self.updateSettings)
 
-        self.stopButton = QPushButton("Stop")
-        self.stopButton.setFont(buttonFont)  # Set the custom font
-        self.stopButton.setObjectName("stopButton")
-        self.stopButton.clicked.connect(self.stopOperations)
-
-        self.initButton = QPushButton("Initialize")
-        self.initButton.setFont(buttonFont)  # Set the custom font
-        self.initButton.setObjectName("initButton")
-        self.initButton.clicked.connect(self.initButtonClicked)
-
-        self.updateButton.setEnabled(False)  # Initially disabled
-        self.stopButton.setEnabled(False)  # Initially disabled
-
-        layout.addWidget(self.updateButton, 4, 0, 1, 2)
-        layout.addWidget(self.stopButton, 5, 0, 1, 2)
-
-        self.initButton.setMinimumHeight(75)  # Set a minimum height for the button.
-        layout.addWidget(self.initButton, 4, 2, 2, 1)
-        layout.setRowStretch(4, 1)
-        layout.setRowStretch(5, 1)
-
+        group.setLayout(layout)
         return group
 
-    def createTerminal(self):
-        terminal = QPlainTextEdit()
-        terminal.setStyleSheet("""
-            background-color: #1E1E1E; 
-            color: #D4D4D4; 
-            font-family: 'Verdana', monospace;
-            font-size: 12pt;
-            padding: 1px;
+    def applyButtonStyles(self):
+        # Updated styles with font-size property
+        buttonFontSize = "10pt"  # Example font size, adjust as needed
+        self.initButton.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #98C379;
+                color: white;
+                border: 2px solid #98C379;
+                font-size: {buttonFontSize};
+            }}
+            QPushButton:hover {{
+                background-color: #A8D989;
+            }}
         """)
-        terminal.setReadOnly(True)
-        return terminal
 
-    def addControlWithButtons(self, layout, label, lineEdit, increment):
-        rowIndex = layout.rowCount()
-        layout.addWidget(QLabel(label), rowIndex, 0)
-        layout.addWidget(lineEdit, rowIndex, 1)
+        self.updateButton.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #61AFEF;
+                color: white;
+                border: 2px solid #61AFEF;
+                font-size: {buttonFontSize};
+            }}
+            QPushButton:hover {{
+                background-color: #72BFF7;
+            }}
+        """)
 
+        self.stopButton.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #E06C75;
+                color: white;
+                border: 2px solid #E06C75;
+                font-size: {buttonFontSize};
+            }}
+            QPushButton:hover {{
+                background-color: #EF7A85;
+            }}
+        """)
+
+    def addSettingWithButtons(self, layout, labelText, lineEdit, increment):
+        rowLayout = QHBoxLayout()
+        label = QLabel(labelText)
         upButton = QPushButton("+")
-        downButton = QPushButton("–")
+        downButton = QPushButton("−")
+        
+        # Connect buttons to increment/decrement actions
         upButton.clicked.connect(lambda: self.adjustValue(lineEdit, increment))
         downButton.clicked.connect(lambda: self.adjustValue(lineEdit, -increment))
 
+        # Add widgets to row layout
+        rowLayout.addWidget(label)
+        rowLayout.addWidget(lineEdit)
+        rowLayout.addWidget(upButton)
+        rowLayout.addWidget(downButton)
+
+        # Add row layout to the main settings layout
+        layout.addLayout(rowLayout)
+
+    def adjustValue(self, lineEdit, increment):
+        try:
+            currentValue = float(lineEdit.text())
+            newValue = currentValue + increment
+            lineEdit.setText(f"{newValue:.2f}")
+        except ValueError:
+            # Handle error if the line edit does not contain a valid number
+            lineEdit.setText("0.0")
+
+    def toggleHeaterMode(self, isVirtualHeaterActive):
+        self.virtualHeaterButton.setChecked(isVirtualHeaterActive)
+        self.ssrHeaterButton.setChecked(not isVirtualHeaterActive)
+        self.updateHeaterButtons(isVirtualHeaterActive)
+        
+        # Enable "Update Settings" only if SSR Heater is active
+        self.updateButton.setEnabled(not isVirtualHeaterActive)
+        
+        if isVirtualHeaterActive:
+            # Example of reinitializing the building model with boost heat enabled
+            self.currentBuildingModel = CalcParameters(
+                t_a=self.currentAmbientTemperature, 
+                q_design=self.currentDesignHeatingPower,
+                t_flow_design=self.currentFlowTemperatureDesign,
+                mass_flow=self.currentMassFlow,
+                boostHeat=True, 
+                maxPowBooHea=self.boostHeatPower
+            ).createBuilding()
+            print("Boost heat activated.")
+        else:
+            # Reinitialize without boost heat if needed
+            print("Boost heat deactivated.")
+        
+
+    def updateHeaterButtons(self, virtualHeaterActive):
+        activeStyle = """
+            QPushButton {
+                background-color: #E5C07B; /* Black for activated button */
+                color: white;
+                border: 2px solid #E5C07B;
+            }
+        """
+        inactiveStyle = """
+            QPushButton {
+                background-color: #5C6370; /* Grey for unactivated button */
+                color: white;
+                border: 2px solid #5C6370;
+            }
+            QPushButton:hover {
+                background-color: #666666; /* Slightly lighter grey for hover */
+            }
+        """
+
+        if virtualHeaterActive:
+            self.virtualHeaterButton.setStyleSheet(activeStyle)
+            self.ssrHeaterButton.setStyleSheet(inactiveStyle)
+        else:
+            self.virtualHeaterButton.setStyleSheet(inactiveStyle)
+            self.ssrHeaterButton.setStyleSheet(activeStyle)
+
+
+    def addControlWithButtons(self, layout, lineEdit, row, columnSpan):
+        upButton = QPushButton("+")
+        downButton = QPushButton("–")
+
+        def increment():
+            lineEdit.setText(str(float(lineEdit.text()) + 1))
+
+        def decrement():
+            lineEdit.setText(str(float(lineEdit.text()) - 1))
+
+        upButton.clicked.connect(increment)
+        downButton.clicked.connect(decrement)
+
+        # Button layout adjustment
         buttonLayout = QHBoxLayout()
         buttonLayout.addWidget(upButton)
         buttonLayout.addWidget(downButton)
+
         container = QWidget()
         container.setLayout(buttonLayout)
-        layout.addWidget(container, rowIndex, 2)
-
-    def adjustValue(self, lineEdit, increment):
-        currentValue = float(lineEdit.text())
-        newValue = currentValue + increment
-        lineEdit.setText(f"{newValue:.1f}" if increment < 1 else f"{newValue}")
+        layout.addWidget(container, row, columnSpan)
 
     def addToSpreadsheet(self, timeData, temperature, resistance, dacVoltage, voltage, flowRate):
         rowPosition = self.tableWidget.rowCount()
@@ -517,6 +668,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.temperature_data.append(temperature)
         self.flow_rate_data.append(flowRate)
 
+    def initButtonClicked(self):
+        # Optionally, re-open the serial connection if it was closed
+        if self.arduinoSerial is None or not self.arduinoSerial.isOpen():
+            try:
+                self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+                self.logToTerminal("> Serial connection re-established.")
+            except serial.SerialException as e:
+                self.logToTerminal(f"> Error reconnecting to Arduino: {e}", messageType="error")
+                return  # Early return if connection fails
+
+        # Restart the QTimer
+        if not self.timer.isActive():
+            self.timer.start(1000)  # Adjust the interval as necessary
+            self.logToTerminal("> Timer restarted.")
+
+        self.logToTerminal("> System (re-)initialized.")
+
+        # Enable buttons upon initialization
+        self.stopButton.setEnabled(True)
+        self.virtualHeaterButton.setEnabled(True)
+        self.ssrHeaterButton.setEnabled(True)
+        self.dacVoltageInput.setEnabled(True)
+        self.targetTempInput.setEnabled(True)
+        self.toleranceInput.setEnabled(True)
+
     def updateSettings(self):
         # Retrieve the values from the input fields
         temp = self.targetTempInput.text()
@@ -560,26 +736,15 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.logToTerminal("> Operations halted.")
 
-    def initButtonClicked(self):
-        # Optionally, re-open the serial connection if it was closed
-        if self.arduinoSerial is None or not self.arduinoSerial.isOpen():
-            try:
-                self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
-                self.logToTerminal("> Serial connection re-established.")
-            except serial.SerialException as e:
-                self.logToTerminal(f"> Error reconnecting to Arduino: {e}", messageType="error")
-                return  # Early return if connection fails
+        # Disable buttons to require re-initialization
+        self.updateButton.setEnabled(False)
+        self.stopButton.setEnabled(False)
+        self.virtualHeaterButton.setEnabled(False)
+        self.ssrHeaterButton.setEnabled(False)
+        self.dacVoltageInput.setEnabled(False)
+        self.targetTempInput.setEnabled(False)
+        self.toleranceInput.setEnabled(False)
 
-        # Restart the QTimer
-        if not self.timer.isActive():
-            self.timer.start(1000)  # Adjust the interval as necessary
-            self.logToTerminal("> Timer restarted.")
-
-        self.logToTerminal("> System (re-)initialized.")
-
-        # Enable the Update Settings and Stop buttons
-        self.updateButton.setEnabled(True)
-        self.stopButton.setEnabled(True)
 
     def logToTerminal(self, message, messageType="info"):
         # Define color codes or styles for different message types
@@ -598,6 +763,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # Append the formatted message to the terminal
         self.terminal.appendHtml(formattedMessage)
 
+    def createTerminal(self):
+        terminal = QPlainTextEdit()
+        terminal.setStyleSheet("""
+            background-color: #1E1E1E; 
+            color: #D4D4D4; 
+            font-family: 'Verdana', monospace;
+            font-size: 12pt;
+            padding: 1px;
+        """)
+        terminal.setReadOnly(True)
+        return terminal
+
     def updateGraph(self):
         if not self.time_data:  # Check if there's data to plot
             return
@@ -609,7 +786,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # Plot flow rate vs. time on a secondary y-axis
         self.ax2 = self.ax.twinx()  # Create a secondary y-axis
         self.ax2.plot(self.time_data, self.flow_rate_data, label='Flow Rate (L/s)', color='#61AFEF', linewidth=2)
-        self.ax2.set_ylabel('Flow Rate (L/s)', color='#61AFEF')  # Set label for the secondary y-axis
 
         # Set the face color to match the One Dark Pro theme
         self.ax.set_facecolor('#282C34')
@@ -629,7 +805,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.ax.xaxis.set_ticks(self.time_data[::step])
         
         # Update axis labels and title
-        self.ax.set_title('Temperature & Flow Rate vs Time', color='#ABB2BF')
+        self.ax.set_title('Temperature & Flow Rate VS Time', color='#ABB2BF')
 
         # Show legend
         lines, labels = self.ax.get_legend_handles_labels()
@@ -645,4 +821,3 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
-                                                   
