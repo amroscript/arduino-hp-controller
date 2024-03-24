@@ -256,12 +256,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "DAC Voltage", "Sensor Voltage", "Flow Rate"])
 
         # Set the width of each column in the table
-        self.tableWidget.setColumnWidth(0, 147.5)  # Time column width
-        self.tableWidget.setColumnWidth(1, 147.5)  # Temperature column width
-        self.tableWidget.setColumnWidth(2, 147.5)  # Resistance column width
-        self.tableWidget.setColumnWidth(3, 147.5)  # DAC Voltage column width
-        self.tableWidget.setColumnWidth(4, 148)  # Sensor Voltage column width
-        self.tableWidget.setColumnWidth(5, 148)  # Flow Rate column width
+        self.tableWidget.setColumnWidth(0, int(147.5))  # Time column width
+        self.tableWidget.setColumnWidth(1, int(147.5))  # Temperature column width
+        self.tableWidget.setColumnWidth(2, int(147.5))  # Resistance column width
+        self.tableWidget.setColumnWidth(3, int(147.5))  # DAC Voltage column width
+        self.tableWidget.setColumnWidth(4, int(148))  # Sensor Voltage column width
+        self.tableWidget.setColumnWidth(5, int(148))  # Flow Rate column width
 
         # Adding the tableWidget to the table layout
         tableLayout.addWidget(self.tableWidget)
@@ -433,7 +433,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Add layout to a container widget for proper alignment
         buttonContainer = QWidget()
         buttonContainer.setLayout(heaterButtonLayout)
-        layout.addWidget(QLabel("Toggle Heater Mode:"), 0, 0)
+        layout.addWidget(QLabel("Select Heater Mode:"), 0, 0)
         layout.addWidget(buttonContainer, 0, 1)
 
         # Update styling based on the initial state
@@ -626,42 +626,46 @@ class MainWindow(QtWidgets.QMainWindow):
             if self.arduinoSerial and self.arduinoSerial.in_waiting:
                 serialData = self.arduinoSerial.readline().decode('utf-8').strip()
                 print(f"Received data: {serialData}")  # Debug print
-                dataFields = serialData.split(',')
-                currentTime = time.strftime("%H:%M:%S", time.localtime())  # Format current time as a string
-                temperature = resistance = dacVoltage = sensorVoltage = flowRate = None  # Initialize as None for clarity
 
-                for field in dataFields:
-                    try:
-                        key, value = field.split(':', 1)
-                        if key.strip() == 'Temp':
-                            self.temperatureLabel.setText(f"{value}°C")
-                            temperature = float(value)
-                        elif key.strip() == 'Res':
-                            self.resistanceLabel.setText(f"{value}Ω")
-                            resistance = float(value)  # Assuming you want to plot or use this later
-                        elif key.strip() == 'DACVolt':
-                            self.dacVoltageLabel.setText(f"{value}V")
-                            dacVoltage = float(value)
-                        elif key.strip() == 'SensorVolt':
-                            self.sensorVoltageLabel.setText(f"{value}V")
-                            sensorVoltage = float(value)  # Assuming you want to plot or use this later
-                        elif key.strip() == 'FlowRate':
-                            self.flowRateLabel.setText(f"{value}L/s")
-                            flowRate = float(value)
-                    except ValueError as ve:
-                        print(f"Error parsing field: {field}. Error: {ve}")
+                # Check if the received data is a key-value pair
+                if ':' in serialData:
+                    dataFields = serialData.split(',')
+                    currentTime = time.strftime("%H:%M:%S", time.localtime())  # Format current time as a string
+                    temperature = resistance = dacVoltage = sensorVoltage = flowRate = None  # Initialize as None for clarity
 
-                # Ensure there's valid temperature and flowRate data before appending
-                if temperature is not None and flowRate is not None:
-                    self.time_data.append(currentTime)
-                    self.temperature_data.append(temperature)
-                    self.flow_rate_data.append(flowRate)
-                    self.updateGraph()  # Update the graph with new data
-                    self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)  # Pass currentTime as the first argument
+                    for field in dataFields:
+                        try:
+                            key, value = field.split(':', 1)
+                            if key.strip() == 'Temp':
+                                self.temperatureLabel.setText(f"{value}°C")
+                                temperature = float(value)
+                            elif key.strip() == 'Res':
+                                self.resistanceLabel.setText(f"{value}Ω")
+                                resistance = float(value)  # Assuming you want to plot or use this later
+                            elif key.strip() == 'DACVolt':
+                                self.dacVoltageLabel.setText(f"{value}V")
+                                dacVoltage = float(value)
+                            elif key.strip() == 'SensorVolt':
+                                self.sensorVoltageLabel.setText(f"{value}V")
+                                sensorVoltage = float(value)  # Assuming you want to plot or use this later
+                            elif key.strip() == 'FlowRate':
+                                self.flowRateLabel.setText(f"{value}L/s")
+                                flowRate = float(value)
+                        except ValueError as ve:
+                            print(f"Error parsing field: {field}. Error: {ve}")
 
+                    # Ensure there's valid temperature and flowRate data before appending
+                    if temperature is not None and flowRate is not None:
+                        self.time_data.append(currentTime)
+                        self.temperature_data.append(temperature)
+                        self.flow_rate_data.append(flowRate)
+                        self.updateGraph()  # Update the graph with new data
+                        self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)  # Pass currentTime as the first argument
+                else:
+                    # Handle or log non-key:value messages if necessary
+                    print(f"Non-data message received: {serialData}")
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
-
 
     def handleNewData(self, time, temperature, flowRate):
         self.time_data.append(time)
