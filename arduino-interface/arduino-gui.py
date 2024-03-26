@@ -681,35 +681,33 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             print("Mass flow data is not yet available. Delaying model initialization.")
 
-    # Example function tied to the update of the virtual heater settings
     def updateVirtualHeaterSettings(self):
         try:
             # Read values from input fields
             ambient_temp = float(self.ambientTempInput.text())
             design_power = float(self.designHeatingPowerInput.text())
-            initial_return_temp = float(self.initialReturnTempInput.text())
             
             # Check if the virtual heater is on or off to set boostHeat
             boostHeat = self.virtualHeaterButton.isChecked()
+            self.logToTerminal(f"> boostHeat status: {'Activated' if boostHeat else 'Deactivated'}")
             
             # Update the model
             self.currentBuildingModel = CalcParameters(
                 t_a=ambient_temp,
                 q_design=design_power,
                 t_flow_design=self.currentFlowTemperatureDesign, # Assuming this is static or set elsewhere
-                mass_flow=self.currentMassFlow, # Assuming this is static or set elsewhere
+                mass_flow=self.currentMassFlow, # Assuming this is dynamically updated elsewhere in your program
                 boostHeat=boostHeat,
-                maxPowBooHea=self.boostHeatPower, # Assuming this is static or set elsewhere
-                t_start_b=initial_return_temp
+                maxPowBooHea=self.boostHeatPower # Assuming this is static or set elsewhere
             ).createBuilding()
             
             self.logToTerminal("Virtual heater settings updated successfully.")
         except ValueError as e:
             self.logToTerminal(f"Error updating virtual heater settings: {str(e)}", messageType="error")
 
+        # Assuming you want to automatically update the model upon changing any of these settings
         self.ambientTempInput.textChanged.connect(self.updateVirtualHeaterSettings)
         self.designHeatingPowerInput.textChanged.connect(self.updateVirtualHeaterSettings)
-        self.initialReturnTempInput.textChanged.connect(self.updateVirtualHeaterSettings)
         self.virtualHeaterButton.toggled.connect(self.updateVirtualHeaterSettings)
 
     def addControlWithButtons(self, layout, lineEdit, row, columnSpan):
@@ -832,18 +830,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dacVoltageInput.setEnabled(True)
         self.targetTempInput.setEnabled(True)
         self.toleranceInput.setEnabled(True)
-
+            
     def updateSettings(self):
         if self.validateVirtualHeaterSettings():
             # Retrieve values from UI
             ambient_temp = float(self.ambientTempInput.text())
             design_power = float(self.designHeatingPowerInput.text())
-            initial_return_temp = float(self.initialReturnTempInput.text())  # Assuming this is now needed
             boostHeat = self.virtualHeaterButton.isChecked()
 
             try:
-                # Assuming updateBuildingModel is now correctly set up to handle initial_return_temp
-                self.currentBuildingModel = self.updateBuildingModel(ambient_temp, design_power, boostHeat, initial_return_temp)
+                # Correctly pass the expected number of arguments to updateBuildingModel
+                self.currentBuildingModel = self.updateBuildingModel(ambient_temp, design_power, boostHeat)
                 self.logToTerminal("> Building model updated with current parameters.")
 
                 # If SSR settings are separate and need to be updated only when SSR heater is on
@@ -854,6 +851,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.logToTerminal(f"> Failed to update settings: {e}", messageType="error")
         else:
             self.logToTerminal("> Invalid settings. Please check your inputs.", messageType="warning")
+
 
         # SSR settings update if SSR heater is on
         if self.ssrHeaterButton.isChecked():
@@ -871,34 +869,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.logToTerminal("> SSR heater settings updated.")
             except ValueError as e:
                 self.logToTerminal(f"> Error updating SSR settings: {e}", messageType="error")
-        elif not self.ssrHeaterButton.isChecked() and not self.virtualHeaterButton.isChecked():
-            self.logToTerminal("> No heater settings updated. Please activate a heater mode.", messageType="warning")
 
     def updateBuildingModel(self, t_a, q_design, boostHeat):
         try:
-            # Parameters derived from your setup, adjust as necessary
-            t_flow_design = 55  # Example: Default or retrieved from UI
-            mass_flow = self.currentMassFlow  # Assuming this is dynamically updated elsewhere in your program
-            # Example values for mcp_h and mcp_b, adjust as needed based on your system's specific heat capacities
-            mcp_h = 505E3 / 258
-            mcp_b = 55E6 / 263
-
-            # Create the building model with the updated parameters
+            # Parameters for the building model, adjust as necessary
+            t_flow_design = self.currentFlowTemperatureDesign
+            mass_flow = self.currentMassFlow
+            # Call CalcParameters with the correct parameters
             self.currentBuildingModel = CalcParameters(
                 t_a=t_a,
                 q_design=q_design,
                 t_flow_design=t_flow_design,
                 mass_flow=mass_flow,
-                delta_T_cond=5,  # Example: temperature difference, adjust as necessary
-                const_flow=True,  # Or False, based on your specific system setup
-                tau_b=55E6 / 263,
-                tau_h=505E3 / 258,
-                t_b=20,  # Example: Default or retrieved from UI
+                delta_T_cond=5,  # Example value, adjust as necessary
+                const_flow=True,  # Or False, based on your system setup
+                tau_b=55E6 / 263,  # Example value, adjust as necessary
+                tau_h=505E3 / 258,  # Example value, adjust as necessary
+                t_b=20,  # Default or from UI
                 boostHeat=boostHeat,
-                maxPowBooHea=7000  # Example: Maximum power for boost heat, adjust as necessary
+                maxPowBooHea=7000  # Example value, adjust as necessary
             ).createBuilding()
-
-            self.logToTerminal("> Building model created/updated with current parameters.")
+            self.logToTerminal("> Building model created and initialized.")
         except Exception as e:
             self.logToTerminal(f"> Failed to create/update building model: {e}", messageType="error")
 
