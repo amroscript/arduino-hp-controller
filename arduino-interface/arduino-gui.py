@@ -21,7 +21,6 @@ from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QPushBut
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
 from PyQt5.QtCore import QTimer, Qt, QSize
 
-
 # Arduino serial connection set-up
 ARDUINO_PORT = 'COM3' # Hard-coded 
 BAUD_RATE = 9600
@@ -88,6 +87,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
+        self.arduinoSerial = serial.Serial('COM3', 9600, timeout=1)
+        
         # Define initial values for attributes used in the model
         self.currentAmbientTemperature =0.0  # NOT Dynamic update
         self.currentMassFlow = 0.0  # Dynamic update
@@ -124,7 +125,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toleranceInput = QtWidgets.QLineEdit()
 
         self.setWindowTitle("ArduinoUI")
-        self.setGeometry(200, 200, 1000, 600)
         self.setupUI()
         applyOneDarkProTheme(QApplication.instance())
 
@@ -135,7 +135,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.initSerialConnection() # Initialize serial connection with Arduino
 
         self.updateButton.setEnabled(True)
-        self.stopButton.setEnabled(False)
+        self.stopButton.setEnabled(True)
         self.virtualHeaterButton.setEnabled(True)
         self.ssrHeaterButton.setEnabled(True)
         self.dacVoltageInput.setEnabled(False)
@@ -797,7 +797,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)
                 else:
                     # Handle or log non-key:value messages if necessary
-                    print(f"Non-data message received: {serialData}")
+                    print(f"Message received: {serialData}")
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
 
@@ -838,66 +838,102 @@ class MainWindow(QtWidgets.QMainWindow):
             # Retrieve values from UI
             ambient_temp = float(self.ambientTempInput.text())
             design_power = float(self.designHeatingPowerInput.text())
-            initial_return_temp = float(self.initialReturnTempInput.text())  # Example retrieval, adjust as needed
-            boostHeat = self.virtualHeaterButton.isChecked()  # Virtual Heater status
+            initial_return_temp = float(self.initialReturnTempInput.text())  # Assuming this is now needed
+            boostHeat = self.virtualHeaterButton.isChecked()
 
-            # Update Building Model
-            self.currentBuildingModel = self.updateBuildingModel(ambient_temp, design_power, initial_return_temp, boostHeat)
+            try:
+                # Assuming updateBuildingModel is now correctly set up to handle initial_return_temp
+                self.currentBuildingModel = self.updateBuildingModel(ambient_temp, design_power, boostHeat, initial_return_temp)
+                self.logToTerminal("> Building model updated with current parameters.")
 
-            # SSR settings update if SSR heater is on
-            if self.ssrHeaterButton.isChecked():
-                # Example: Adjust your SSR heater settings here
-                # This is a placeholder. Implement the logic as needed.
-                self.logToTerminal("> SSR heater settings updated.")
-
-            self.logToTerminal("> Building model and settings updated.")
+                # If SSR settings are separate and need to be updated only when SSR heater is on
+                if self.ssrHeaterButton.isChecked():
+                    # Update SSR settings here
+                    self.logToTerminal("> SSR heater settings updated.")
+            except Exception as e:
+                self.logToTerminal(f"> Failed to update settings: {e}", messageType="error")
         else:
             self.logToTerminal("> Invalid settings. Please check your inputs.", messageType="warning")
 
+        # SSR settings update if SSR heater is on
+        if self.ssrHeaterButton.isChecked():
+            try:
+                # Retrieve SSR Heater settings
+                targetTemperature = self.targetTempInput.text()
+                tolerance = self.toleranceInput.text()
+                dacVoltage = self.dacVoltageInput.text()
 
-        # Update Virtual Heater and Building Model settings
-        try:
-            ambient_temp = float(self.ambientTempInput.text())
-            design_power = float(self.designHeatingPowerInput.text())
-            initial_return_temp = float(self.initialReturnTempInput.text())
+                # Send serial commands to the Arduino for each SSR setting
+                self.sendSerialCommand(f"setTemp {targetTemperature}")
+                self.sendSerialCommand(f"setTolerance {tolerance}")
+                self.sendSerialCommand(f"setVoltage {dacVoltage}")
+                
+                self.logToTerminal("> SSR heater settings updated.")
+            except ValueError as e:
+                self.logToTerminal(f"> Error updating SSR settings: {e}", messageType="error")
+        elif not self.ssrHeaterButton.isChecked() and not self.virtualHeaterButton.isChecked():
+            self.logToTerminal("> No heater settings updated. Please activate a heater mode.", messageType="warning")
 
-            # Update boostHeat based on the Virtual Heater button's state
-            boostHeat = self.virtualHeaterButton.isChecked()
-
-            # Update the building model
-            self.currentBuildingModel = self.updateBuildingModel(ambient_temp, design_power, initial_return_temp, boostHeat)
-            self.logToTerminal("> Building model and Virtual heater settings updated.")
-        except ValueError as e:
-            self.logToTerminal(f"> Error updating Virtual heater/building model settings: {e}", messageType="error")
-
-    def updateBuildingModel(self, t_a, q_design, initial_return_temp, boostHeat):
+    def updateBuildingModel(self, t_a, q_design, boostHeat):
         try:
             # Parameters derived from your setup, adjust as necessary
             t_flow_design = 55  # Example: Default or retrieved from UI
-            mass_flow = self.currentMassFlow  # Updated elsewhere in your program
-            mcp_h = 505E3 / 258  # Example value, adjust as needed
-            mcp_b = 55E6 / 263  # Example value, adjust as needed
+            mass_flow = self.currentMassFlow  # Assuming this is dynamically updated elsewhere in your program
+            # Example values for mcp_h and mcp_b, adjust as needed based on your system's specific heat capacities
+            mcp_h = 505E3 / 258
+            mcp_b = 55E6 / 263
 
-            # Creating the building model with updated parameters
-            building = CalcParameters(
+            # Create the building model with the updated parameters
+            self.currentBuildingModel = CalcParameters(
                 t_a=t_a,
                 q_design=q_design,
                 t_flow_design=t_flow_design,
                 mass_flow=mass_flow,
-                delta_T_cond=5,  # Example value, adjust as necessary
-                const_flow=True,  # Or False, based on your system setup
+                delta_T_cond=5,  # Example: temperature difference, adjust as necessary
+                const_flow=True,  # Or False, based on your specific system setup
                 tau_b=55E6 / 263,
                 tau_h=505E3 / 258,
-                t_b=20,  # Default or from UI
+                t_b=20,  # Example: Default or retrieved from UI
                 boostHeat=boostHeat,
-                maxPowBooHea=7000  # Example value, adjust as necessary
+                maxPowBooHea=7000  # Example: Maximum power for boost heat, adjust as necessary
             ).createBuilding()
 
             self.logToTerminal("> Building model created/updated with current parameters.")
-            return building
         except Exception as e:
             self.logToTerminal(f"> Failed to create/update building model: {e}", messageType="error")
-            return None
+
+    def sendSerialCommand(self, command):
+        if self.arduinoSerial and self.arduinoSerial.isOpen():
+            self.arduinoSerial.write((command + '\n').encode()) 
+            self.logToTerminal(f"> Sent to Arduino: {command}")
+        else:
+            self.logToTerminal("> Error: Serial connection not established.", messageType="error")
+
+    def setDACVoltage(self):
+        """Send DAC voltage setting command to Arduino."""
+        voltage = self.dacVoltageInput.text()  # Assuming dacVoltageInput is a QLineEdit
+        command = f"setVoltage {voltage}"
+        self.sendCommandToArduino(command)
+
+    def setTargetTemperature(self):
+        """Send target temperature setting command to Arduino."""
+        temperature = self.targetTempInput.text()  # Assuming targetTempInput is a QLineEdit
+        command = f"setTemp {temperature}"
+        self.sendCommandToArduino(command)
+
+    def setTolerance(self):
+        """Send tolerance setting command to Arduino."""
+        tolerance = self.toleranceInput.text()  # Assuming toleranceInput is a QLineEdit
+        command = f"setTolerance {tolerance}"
+        self.sendCommandToArduino(command)
+
+    def activateVirtualHeater(self):
+        """Send command to activate virtual heater."""
+        self.sendCommandToArduino("activateVirtualHeater")
+
+    def activateSSRHeater(self):
+        """Send command to activate SSR heater."""
+        self.sendCommandToArduino("activateSSRHeater")
 
     def stopOperations(self):
         # Stop the QTimer
@@ -913,7 +949,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Disable buttons to require re-initialization
         self.updateButton.setEnabled(True)
-        self.stopButton.setEnabled(False)
+        self.stopButton.setEnabled(True)
         self.virtualHeaterButton.setEnabled(False)
         self.ssrHeaterButton.setEnabled(False)
         self.dacVoltageInput.setEnabled(False)
