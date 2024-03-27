@@ -881,13 +881,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 q_design=q_design,
                 t_flow_design=t_flow_design,
                 mass_flow=mass_flow,
-                delta_T_cond=5,  # Example value, adjust as necessary
-                const_flow=True,  # Or False, based on your system setup
-                tau_b=55E6 / 263,  # Example value, adjust as necessary
-                tau_h=505E3 / 258,  # Example value, adjust as necessary
+                delta_T_cond=5,  
+                const_flow=True, 
+                tau_b=55E6 / 263, 
+                tau_h=505E3 / 258,  
                 t_b=20,  # Default or from UI
                 boostHeat=boostHeat,
-                maxPowBooHea=7000  # Example value, adjust as necessary
+                maxPowBooHea=7000  
             ).createBuilding()
             self.logToTerminal("> Building model created and initialized.")
         except Exception as e:
