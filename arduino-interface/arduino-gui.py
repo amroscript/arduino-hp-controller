@@ -21,9 +21,11 @@ from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QPushBut
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
 from PyQt5.QtCore import QTimer, Qt, QSize
 
+
 # Arduino serial connection set-up
 ARDUINO_PORT = 'COM3' # Hard-coded 
 BAUD_RATE = 9600
+
 
 # User-interface theme customization
 def applyOneDarkProTheme(app):
@@ -104,7 +106,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.flow_rate_data = []
         self.stopButton = None
         self.resistanceLabel = None
-        self.measurementGroup = None
+        self.measurementGroup = None       
         self.exportCSVButton = None
         self.controlGroup = None
         self.flowRateLabel = None
@@ -149,7 +151,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def initSerialConnection(self): 
             try:
                 self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
-                self.logToTerminal("> Serial connection established.")
+                self.logToTerminal("> Serial connection established. System initialized.")
             except serial.SerialException as e:
                 self.logToTerminal(f"> Error connecting to Arduino: {e}", messageType="error")
 
@@ -185,12 +187,6 @@ class MainWindow(QtWidgets.QMainWindow):
         tableFrame = QFrame()
         tableLayout = QVBoxLayout()
         tableFrame.setLayout(tableLayout)
-
-        # Frame for the graph
-        graphFrame = QFrame()
-        graphLayout = QVBoxLayout()
-        graphFrame.setLayout(graphLayout)
-        graphFrame.setMaximumWidth(800)  # Adjust this value as needed
 
         # Header Section for Spreadsheet Tab
         headerLayout = QHBoxLayout()
@@ -232,28 +228,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Adding the tableWidget to the table layout
         tableLayout.addWidget(self.tableWidget)
 
-        # Graph setup
-        self.graphFigure = Figure()
-        self.graphCanvas = FigureCanvas(self.graphFigure)
-
         # Now adding both frames to the spreadsheetLayout to arrange them side by side
         spreadsheetLayout.addWidget(tableFrame)
-        spreadsheetLayout.addWidget(graphFrame)
-
-        spreadsheetTab.setLayout(spreadsheetLayout) 
-        self.graphFigure.patch.set_facecolor('#282C34')  # Background color to match One Dark Pro theme
-        self.graphCanvas = FigureCanvas(self.graphFigure)
-        self.ax = self.graphFigure.add_subplot(111)
-        self.ax.set_facecolor('#282C34')  # Graph background color
-        self.ax.tick_params(axis='x', colors='#ABB2BF')  # Adjust to match theme
-        self.ax.tick_params(axis='y', colors='#ABB2BF')
-        self.ax.spines['bottom'].set_color('#ABB2BF')
-        self.ax.spines['top'].set_color('#ABB2BF') 
-        self.ax.spines['right'].set_color('#ABB2BF')
-        self.ax.spines['left'].set_color('#ABB2BF')
-        self.ax.xaxis.label.set_color('#ABB2BF')
-        self.ax.yaxis.label.set_color('#ABB2BF')
-        self.ax.title.set_color('#ABB2BF')
 
         # Apply the stylesheet for One Dark Pro theme consistency
         self.tableWidget.setStyleSheet("""
@@ -281,7 +257,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         tableLayout.addWidget(self.tableWidget)
         spreadsheetTab.setLayout(spreadsheetLayout)  # Set the layout for the spreadsheet tab
-        graphLayout.addWidget(self.graphCanvas)
 
         # Add tabs to the TabWidget
         tabWidget.addTab(controlsTab, "Controls Monitor")
@@ -290,53 +265,27 @@ class MainWindow(QtWidgets.QMainWindow):
         # Set the TabWidget as the central widget
         self.setCentralWidget(tabWidget)
         spreadsheetLayout.addWidget(tableFrame)
-        spreadsheetLayout.addWidget(graphFrame)
-
         spreadsheetTab.setLayout(spreadsheetLayout) 
 
         self.applyButtonStyles()
-
-        # Call updateGraph to refresh the graph with the new data
-        self.updateGraph()
 
     def initializeBuildingModel(self):
         if self.validateVirtualHeaterSettings():
             ambient_temp = float(self.ambientTempInput.text())
             q_design_e = float(self.designHeatingPowerInput.text())
-            t_b = 20.0  # Assuming a default constant building temperature
             mass_flow = self.currentMassFlow / 1000.0  # Convert L/s to kg/s
-
-            # Adjust q_design and t_flow_design based on ambient temperature
-            if ambient_temp <= -10:
-                q_design_adjusted = q_design_e
-                t_flow_design_adjusted = 55
-            elif -10 < ambient_temp <= -7:
-                q_design_adjusted = q_design_e * 0.885
-                t_flow_design_adjusted = 52
-            elif -7 < ambient_temp <= 2:
-                q_design_adjusted = q_design_e * 0.538
-                t_flow_design_adjusted = 42
-            elif 2 < ambient_temp <= 7:
-                q_design_adjusted = q_design_e * 0.346
-                t_flow_design_adjusted = 36
-            elif ambient_temp > 7:
-                q_design_adjusted = q_design_e * 0.154
-                t_flow_design_adjusted = 30
-            else:
-                self.logToTerminal("> Ambient temperature out of expected range.", messageType="warning")
-                return
-
+            
+            # Dynamically adjust design parameters based on current conditions
+            q_design_adjusted, t_flow_design_adjusted = self.adjustDesignParameters(ambient_temp, q_design_e)
+            
             boostHeat = self.virtualHeaterButton.isChecked()
-
+            
             try:
                 self.currentBuildingModel = CalcParameters(
                     t_a=ambient_temp,
                     q_design=q_design_adjusted,
-                    tau_b=209125,
-                    tau_h=1957,
                     t_flow_design=t_flow_design_adjusted,
                     mass_flow=mass_flow,
-                    t_b=t_b,
                     boostHeat=boostHeat,
                     maxPowBooHea=self.boostHeatPower
                 ).createBuilding()
@@ -346,10 +295,49 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.logToTerminal("> Invalid virtual heater settings. Please check your inputs.", messageType="warning")
 
+    def adjustDesignParameters(self, ambient_temp, q_design_e):
+        # This method adjusts the design parameters based on ambient temperature
+        if ambient_temp <= -10:
+            return q_design_e, 55
+        elif -10 < ambient_temp <= -7:
+            return q_design_e * 0.885, 52
+        elif -7 < ambient_temp <= 2:
+            return q_design_e * 0.538, 42
+        elif 2 < ambient_temp <= 7:
+            return q_design_e * 0.346, 36
+        elif ambient_temp > 7:
+            return q_design_e * 0.154, 30
+        else:
+            self.logToTerminal("> Ambient temperature out of expected range.", messageType="warning")
+            return q_design_e, 55  # Default to some sensible values
+
+    def simulateMultipleAmbientScenarios(self):
+        ambient_temperatures = [-10, -7, 2, 7, 12]
+        q_design_e = 5390
+        buildings = []
+
+        for t_a in ambient_temperatures:
+            q_design_adjusted, t_flow_design_adjusted = q_design_e, 55
+
+            building_model_parameters = CalcParameters(
+                t_a=t_a,
+                q_design=q_design_adjusted,
+                t_flow_design=t_flow_design_adjusted,
+                mass_flow=self.currentMassFlow / 1000.0,
+                t_b=20,
+                boostHeat=True,
+                maxPowBooHea=7000
+            )
+            building_model = building_model_parameters.createBuilding()
+            buildings.append(building_model)
+
+            self.logToTerminal(f"Building created for ambient temperature {t_a}°C: Mass B = {building_model.MassB.mcp} J/K, "
+                            f"ua_ba = {building_model.ua_ba} W/K, Mass H = {building_model.MassH.mcp} J/K, "
+                            f"ua_hb = {building_model.ua_hb} W/K.")
 
     def createMeasurementGroup(self):
         group = QGroupBox("Instructions and Real-time Measurements")
-        group.setFont(QFont("Verdana", 12, QFont.Bold))
+        group.setFont(QFont("Verdana", 11, QFont.Bold))
 
         # Main horizontal layout for the group
         mainLayout = QHBoxLayout(group)
@@ -358,10 +346,10 @@ class MainWindow(QtWidgets.QMainWindow):
         instructionsLayout = QVBoxLayout()
         instructionsLabel = QLabel("""
         <p>
-        1. Click the <span style='color: #98C379;'>initialize</span> button to activate all Arduino components.<br>
-        2. The control parameters are only updated when the <span style='color: #61AFEF;'>update settings</span> button is clicked.<br>
-        3. The <span style='color: #E06C75;'>stop</span> button will halt all operations.<br><br>
-        For further clarification please consult the GitHub repository documentation: <a href="https://github.com/amroscript/arduino-hp-controller">Arduino HP Controller</a>.
+        1. The <span style='color: #98C379;'>Initialize</span> button must be clicked to re-activate all Arduino components if operations are stopped.<br>
+        2. The control parameters and building model are initialized & updated when the <span style='color: #61AFEF;'>Update Settings</span> button is clicked.<br>
+        3. The <span style='color: #E06C75;'>Stop</span> button will halt all operations. Re-initialization is required if testing to be resumed.<br><br>
+        For clarification please consult the github repo documentation: github.com/amroscript/arduino-hp-controller.
         </p>
         """)
         instructionsLabel.setFont(QFont("Verdana", 11))
@@ -423,17 +411,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def createControlGroup(self):
             group = QGroupBox("Heater Mode Settings")
-            group.setFont(QFont("Verdana", 12, QFont.Bold))
+            group.setFont(QFont("Verdana", 11, QFont.Bold))
             layout = QVBoxLayout(group)
 
-            # Heater Mode Buttons Setup (without grouping them to allow independent toggling)
+            # Heater Mode Buttons Setup 
             heaterButtonLayout = QHBoxLayout()
             self.ssrHeaterButton = QPushButton("Solid State Relay Heater")
             self.virtualHeaterButton = QPushButton("Virtual Model Heater")
 
             for btn in [self.ssrHeaterButton, self.virtualHeaterButton]:
                 btn.setCheckable(True)
-                btn.setFixedHeight(30)  # Set a fixed height for a consistent look
+                btn.setFixedHeight(31)  # Set a fixed height for a consistent look
                 self.ssrHeaterButton.toggled.connect(self.updateHeaterButtonState)
                 self.virtualHeaterButton.toggled.connect(self.updateHeaterButtonState)
                 heaterButtonLayout.addWidget(btn)
@@ -456,8 +444,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.initButton = QPushButton("Initialize")
             self.stopButton = QPushButton("Stop")
             self.updateButton = QPushButton("Update Settings")
+            
             for btn in [self.initButton, self.updateButton, self.stopButton]:
-                btn.setFixedHeight(30)
+                btn.setFixedHeight(31)
                 buttonLayout.addWidget(btn)
 
             # Compose the final layout
@@ -485,31 +474,45 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
 
     def updateHeaterButtonState(self):
-        # Update settings group titles and styles based on the heater button states
+        # Define active and inactive styles for cleaner code
+        activeStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #98C379; }"  # Green
+        inactiveStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #E06C75; }"  # Red
+        
+        # Update SSR Heater group box
         if self.ssrHeaterButton.isChecked():
             self.ssrSettingsGroup.setTitle("SSR Heater: Activated")
+            self.ssrSettingsGroup.setStyleSheet(activeStyle)
         else:
             self.ssrSettingsGroup.setTitle("SSR Heater: Off")
-
+            self.ssrSettingsGroup.setStyleSheet(inactiveStyle)
+        
+        # Update Virtual Heater group box
         if self.virtualHeaterButton.isChecked():
             self.virtualHeaterSettingsGroup.setTitle("Virtual Heater: Activated")
+            self.virtualHeaterSettingsGroup.setStyleSheet(activeStyle)
         else:
             self.virtualHeaterSettingsGroup.setTitle("Virtual Heater: Off")
+            self.virtualHeaterSettingsGroup.setStyleSheet(inactiveStyle)
+        
+        # Refresh UI components to apply styles immediately
+        self.ssrSettingsGroup.style().unpolish(self.ssrSettingsGroup)
+        self.ssrSettingsGroup.style().polish(self.ssrSettingsGroup)
+        self.virtualHeaterSettingsGroup.style().unpolish(self.virtualHeaterSettingsGroup)
+        self.virtualHeaterSettingsGroup.style().polish(self.virtualHeaterSettingsGroup)
             
     def createSSRSettingsGroup(self):
         group = QGroupBox("SSR Heater Settings")
         group.setFont(QFont("Verdana", 10, QFont.Bold))
         layout = QGridLayout()
 
-        # Existing SSR Heater Settings, assuming you have similar inputs as before
         self.targetTempInput = QLineEdit("23")
-        self.addSettingWithButtons(layout, "Target Temperature (°C):", self.targetTempInput, 0, font_size= 11)
+        self.addSettingWithButtons(layout, "Target Temperature (°C):", self.targetTempInput, 0, font_size= 10.5)
 
         self.toleranceInput = QLineEdit("0.2")
-        self.addSettingWithButtons(layout, "Temperature Tolerance (±°C):", self.toleranceInput, 1, font_size= 11)
+        self.addSettingWithButtons(layout, "Temperature Tolerance (±°C):", self.toleranceInput, 1, font_size= 10.5)
 
         self.dacVoltageInput = QLineEdit("2.5")
-        self.addSettingWithButtons(layout, "DAC Voltage Output (V):", self.dacVoltageInput, 2, font_size= 11)
+        self.addSettingWithButtons(layout, "DAC Voltage Output (V):", self.dacVoltageInput, 2, font_size= 10.5)
 
         group.setLayout(layout)
         return group
@@ -520,24 +523,24 @@ class MainWindow(QtWidgets.QMainWindow):
         design heating power, and initial return temperature including increment/decrement buttons.
         """
         group = QGroupBox("Virtual Heater Settings")
-        group.setFont(QFont("Verdana", 10, QFont.Bold))  # Adjusted font size to 10
+        group.setFont(QFont("Verdana", 10, QFont.Bold))
         layout = QGridLayout()
 
         # Inputs
         self.ambientTempInput = QLineEdit("10")
-        self.addSettingWithButtons(layout, "Ambient Temperature (°C):", self.ambientTempInput, 0, font_size=11)
+        self.addSettingWithButtons(layout, "Ambient Temperature (°C):", self.ambientTempInput, 0, font_size=10.5)
+        
         self.designHeatingPowerInput = QLineEdit("5390")
-        self.addSettingWithButtons(layout, "Design Heating Power (W):", self.designHeatingPowerInput, 1, font_size=11)
+        self.addSettingWithButtons(layout, "Design Heating Power (W):", self.designHeatingPowerInput, 1, font_size=10.5)
 
-        # Initial Return Temperature Input with buttons
-        self.initialReturnTempInput = QLineEdit("20.0")  # Default value as an example
-        self.addSettingWithButtons(layout, "Initial Return Temperature (°C):", self.initialReturnTempInput, 2, font_size=11)
+        self.initialReturnTempInput = QLineEdit("20.0")  
+        self.addSettingWithButtons(layout, "Initial Return Temperature (°C):", self.initialReturnTempInput, 2, font_size=10.5)
 
         group.setLayout(layout)
         return group
     
     def applyButtonStyles(self):
-        buttonFontSize = "10pt" 
+        buttonFontSize = "8pt" 
 
         # Initialize, Update, and Stop Buttons
         self.initButton.setStyleSheet(f"""
@@ -546,6 +549,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 color: white;
                 border: 2px solid #98C379;
                 font-size: {buttonFontSize};
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: #A8D989;
@@ -558,6 +562,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 color: white;
                 border: 2px solid #61AFEF;
                 font-size: {buttonFontSize};
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: #72BFF7;
@@ -570,6 +575,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 color: white;
                 border: 2px solid #E06C75;
                 font-size: {buttonFontSize};
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: #EF7A85;
@@ -577,45 +583,42 @@ class MainWindow(QtWidgets.QMainWindow):
         """)
 
     def updateHeaterButtonState(self):
-        # Define styles for the buttons
-        activeButtonStyle = "QPushButton { background-color: #ABB2BF; color: white; border: 2px solid #ABB2BF; font-size: 10pt; }"
-        inactiveButtonStyle = "QPushButton { background-color: #5C6370; color: white; border: 2px solid #5C6370; font-size: 10pt; }"
+        # Define active and inactive styles for cleaner code
+        activeStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #98C379; }"  # Green
+        inactiveStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #E06C75; }"  # Red
         
-        # Apply the active or inactive style to the buttons
-        self.ssrHeaterButton.setStyleSheet(activeButtonStyle if self.ssrHeaterButton.isChecked() else inactiveButtonStyle)
-        self.virtualHeaterButton.setStyleSheet(activeButtonStyle if self.virtualHeaterButton.isChecked() else inactiveButtonStyle)
-        
-        # Update the group titles and colors
+        # Update SSR Heater group box
         if self.ssrHeaterButton.isChecked():
             self.ssrSettingsGroup.setTitle("SSR HEATER ACTIVATED")
-            self.ssrSettingsGroup.setStyleSheet("QGroupBox { font: 9pt; font-weight: bold; color: #98C379; }")  # Green for activated
+            self.ssrSettingsGroup.setStyleSheet(activeStyle)
         else:
             self.ssrSettingsGroup.setTitle("SSR HEATER OFF")
-            self.ssrSettingsGroup.setStyleSheet("QGroupBox { font: 9pt; font-weight: bold; color: #E06C75; }")  # Red for off
+            self.ssrSettingsGroup.setStyleSheet(inactiveStyle)
         
+        # Update Virtual Heater group box
         if self.virtualHeaterButton.isChecked():
             self.virtualHeaterSettingsGroup.setTitle("VIRTUAL HEATER ACTIVATED")
-            self.virtualHeaterSettingsGroup.setStyleSheet("QGroupBox { font: 9pt; font-weight: bold; color: #98C379; }")  # Green for activated
+            self.virtualHeaterSettingsGroup.setStyleSheet(activeStyle)
         else:
             self.virtualHeaterSettingsGroup.setTitle("VIRTUAL HEATER OFF")
-            self.virtualHeaterSettingsGroup.setStyleSheet("QGroupBox { font: 9pt; font-weight: bold; color: #E06C75; }")  # Red for off
+            self.virtualHeaterSettingsGroup.setStyleSheet(inactiveStyle)
+        
+        # Refresh UI components to apply styles immediately
+        self.ssrSettingsGroup.style().unpolish(self.ssrSettingsGroup)
+        self.ssrSettingsGroup.style().polish(self.ssrSettingsGroup)
+        self.virtualHeaterSettingsGroup.style().unpolish(self.virtualHeaterSettingsGroup)
+        self.virtualHeaterSettingsGroup.style().polish(self.virtualHeaterSettingsGroup)
 
-        # Ensure UI updates are applied immediately
-        self.ssrHeaterButton.style().unpolish(self.ssrHeaterButton)
-        self.ssrHeaterButton.style().polish(self.ssrHeaterButton)
-        self.virtualHeaterButton.style().unpolish(self.virtualHeaterButton)
-        self.virtualHeaterButton.style().polish(self.virtualHeaterButton)
-
-    def addSettingWithButtons(self, layout, labelText, lineEdit, row, font_size=12):
+    def addSettingWithButtons(self, layout, labelText, lineEdit, row, font_size=10):
         label = QLabel(labelText)
-        label.setFont(QFont("Verdana", font_size))
+        label.setFont(QFont("Verdana", int(font_size)))
         layout.addWidget(label, row, 0)
 
         # Increment/Decrement buttons
         upButton = QPushButton("+")
         downButton = QPushButton("-")
-        upButton.setFont(QFont("Verdana", font_size))
-        downButton.setFont(QFont("Verdana", font_size))
+        upButton.setFont(QFont("Verdana", int(font_size)))
+        downButton.setFont(QFont("Verdana", int(font_size)))
 
         # Set a fixed size for the buttons
         buttonSize = QSize(30, 30)
@@ -627,7 +630,8 @@ class MainWindow(QtWidgets.QMainWindow):
         downButton.clicked.connect(lambda: self.adjustValue(lineEdit, -1))
 
         lineEdit.setMinimumSize(QSize(100, 30))  # Adjusted size to make room for buttons
-        lineEdit.setFont(QFont("Verdana", font_size))
+        lineEdit.setFont(QFont("Verdana", int(font_size)))
+        lineEdit.setEnabled(True)  # Ensure the line edit is enabled
 
         # Create a layout for buttons and line edit
         controlLayout = QHBoxLayout()
@@ -675,40 +679,32 @@ class MainWindow(QtWidgets.QMainWindow):
                     boostHeat=True, 
                     maxPowBooHea=self.boostHeatPower
                 ).createBuilding()
-                print("Boost heat activated.")
+                print("Virtual heater activated.")
             else:
-                print("Boost heat deactivated.")
+                print("Virtual heater deactivated.")
         else:
             print("Mass flow data is not yet available. Delaying model initialization.")
 
-    def updateVirtualHeaterSettings(self):
+    def validateVirtualHeaterSettings(self):
         try:
-            # Read values from input fields
+            # Attempt to convert the text input from the UI to float
             ambient_temp = float(self.ambientTempInput.text())
             design_power = float(self.designHeatingPowerInput.text())
+            initial_return_temp = float(self.initialReturnTempInput.text())
             
-            # Check if the virtual heater is on or off to set boostHeat
-            boostHeat = self.virtualHeaterButton.isChecked()
-            self.logToTerminal(f"> boostHeat status: {'Activated' if boostHeat else 'Deactivated'}")
+            # Validate the converted values are within expected ranges
+            if not -40 <= ambient_temp <= 40:
+                raise ValueError("Ambient temperature out of expected range.")
+            if design_power <= 0:
+                raise ValueError("Design heating power must be greater than 0.")
+            if not 10 <= initial_return_temp <= 30:
+                raise ValueError("Initial return temperature out of expected range.")
             
-            # Update the model
-            self.currentBuildingModel = CalcParameters(
-                t_a=ambient_temp,
-                q_design=design_power,
-                t_flow_design=self.currentFlowTemperatureDesign, # Assuming this is static or set elsewhere
-                mass_flow=self.currentMassFlow, # Assuming this is dynamically updated elsewhere in your program
-                boostHeat=boostHeat,
-                maxPowBooHea=self.boostHeatPower # Assuming this is static or set elsewhere
-            ).createBuilding()
-            
-            self.logToTerminal("Virtual heater settings updated successfully.")
-        except ValueError as e:
-            self.logToTerminal(f"Error updating virtual heater settings: {str(e)}", messageType="error")
-
-        # Assuming you want to automatically update the model upon changing any of these settings
-        self.ambientTempInput.textChanged.connect(self.updateVirtualHeaterSettings)
-        self.designHeatingPowerInput.textChanged.connect(self.updateVirtualHeaterSettings)
-        self.virtualHeaterButton.toggled.connect(self.updateVirtualHeaterSettings)
+            # If all checks pass, return True
+            return True
+        except ValueError:
+            # If any conversion fails or a check doesn't pass, return False
+            return False
 
     def addControlWithButtons(self, layout, lineEdit, row, columnSpan):
         upButton = QPushButton("+")
@@ -742,64 +738,105 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(container, row, columnSpan)
 
     def addToSpreadsheet(self, timeData, temperature, resistance, dacVoltage, voltage, flowRate):
-        rowPosition = self.tableWidget.rowCount()
-        self.tableWidget.insertRow(rowPosition)
-        self.tableWidget.setItem(rowPosition, 0, QTableWidgetItem(timeData))
-        self.tableWidget.setItem(rowPosition, 1, QTableWidgetItem(str(temperature)))
-        self.tableWidget.setItem(rowPosition, 2, QTableWidgetItem(str(resistance)))
-        self.tableWidget.setItem(rowPosition, 3, QTableWidgetItem(str(dacVoltage)))
-        self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(str(voltage)))
-        self.tableWidget.setItem(rowPosition, 5, QTableWidgetItem(str(flowRate)))
+        """
+        Adds a row of data to the spreadsheet.
 
+        This function takes various measurements (timeData, temperature, resistance, dacVoltage, voltage, flowRate)
+        and inserts them into a new row in the spreadsheet. Each parameter corresponds to a specific column in the table.
+        It uses exception handling to catch and report any issues that might occur during the data insertion process,
+        ensuring the application remains stable even if errors are encountered.
+
+        Parameters:
+        - timeData (str): The time at which the data was recorded.
+        - temperature (float): The measured temperature.
+        - resistance (float): The measured resistance.
+        - dacVoltage (float): The DAC voltage setting.
+        - voltage (float): The measured sensor voltage.
+        - flowRate (float): The measured flow rate.
+        """
+        rowPosition = self.tableWidget.rowCount()
+        try:
+            self.tableWidget.insertRow(rowPosition)
+            self.tableWidget.setItem(rowPosition, 0, QTableWidgetItem(timeData))
+            self.tableWidget.setItem(rowPosition, 1, QTableWidgetItem(str(temperature)))
+            self.tableWidget.setItem(rowPosition, 2, QTableWidgetItem(str(resistance)))
+            self.tableWidget.setItem(rowPosition, 3, QTableWidgetItem(str(dacVoltage)))
+            self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(str(voltage)))
+            self.tableWidget.setItem(rowPosition, 5, QTableWidgetItem(str(flowRate)))
+        except Exception as e:
+            print(f"Error adding data to spreadsheet: {e}")
+    
     def updateDisplay(self):
+        """
+        Processes incoming serial data and updates the GUI display accordingly.
+
+        This function reads data sent from the Arduino over the serial connection. It expects the data to be in a specific format,
+        with each piece of data labeled (e.g., "Temp:20.5, Res:100.0, ..."). The function parses this data, updates the display
+        elements in the GUI (like temperature, resistance, etc.), and appends the data to the spreadsheet and graph.
+
+        It incorporates error handling to manage unexpected data formats or communication issues, ensuring the application's stability.
+        Debugging messages are printed to the console for troubleshooting purposes.
+        """
         try:
             if self.arduinoSerial and self.arduinoSerial.in_waiting:
                 serialData = self.arduinoSerial.readline().decode('utf-8').strip()
-                print(f"Received data: {serialData}")  # Debug print
+                print(f"Received serial data: {serialData}")  # Debug print
 
-                # Check if the received data is a key-value pair
+                # Check if the received data is in key-value pair format
                 if ':' in serialData:
                     dataFields = serialData.split(',')
-                    currentTime = time.strftime("%H:%M:%S", time.localtime())  # Format current time as a string
-                    temperature = resistance = dacVoltage = sensorVoltage = flowRate = None  # Initialize as None for clarity
+                    currentTime = time.strftime("%H:%M:%S", time.localtime())
+                    temperature = resistance = dacVoltage = sensorVoltage = flowRate = None
 
                     for field in dataFields:
                         try:
                             key, value = field.split(':', 1)
+                            # Update GUI based on the key and log the action
                             if key.strip() == 'Temp':
                                 temp = float(value)
                                 self.temperatureLabel.setText(f"{temp}°C")
-                                t_sup = temp  # Update t_sup with the actual temperature
                             elif key.strip() == 'Res':
+                                resistance = float(value)
                                 self.resistanceLabel.setText(f"{value}Ω")
-                                resistance = float(value)  # Assuming you want to use this later
                             elif key.strip() == 'DACVolt':
-                                self.dacVoltageLabel.setText(f"{value}V")
                                 dacVoltage = float(value)
+                                self.dacVoltageLabel.setText(f"{value}V")
                             elif key.strip() == 'SensorVolt':
+                                sensorVoltage = float(value)
                                 self.sensorVoltageLabel.setText(f"{value}V")
-                                sensorVoltage = float(value)  # Assuming you want to use this later
                             elif key.strip() == 'FlowRate':
-                                self.flowRateLabel.setText(f"{value}L/s")
                                 flowRate = float(value)
-                                self.currentMassFlow = float(value) / 1000.0  # Convert L/s to kg/s
+                                self.flowRateLabel.setText(f"{value}L/s")
+                                self.currentMassFlow = flowRate / 1000.0
                         except ValueError as ve:
                             print(f"Error parsing field: {field}. Error: {ve}")
 
-                    # Append valid temperature and flowRate data
+                    # Append valid temperature and flowRate data to the spreadsheet and potentially to the graph
                     if temperature is not None and flowRate is not None:
                         self.time_data.append(currentTime)
                         self.temperature_data.append(temperature)
                         self.flow_rate_data.append(flowRate)
-                        self.updateGraph()  # Update the graph with new data
                         self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)
+                        print("Appended data to spreadsheet.")
                 else:
                     # Handle or log non-key:value messages if necessary
-                    print(f"Message received: {serialData}")
+                    print(f"Non key-value pair message received: {serialData}")
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
+            print(f"SerialException encountered: {e}")
 
     def handleNewData(self, time, temperature, flowRate):
+        """
+        Handles incoming new data by appending it to the respective lists.
+
+        This method is called whenever new data points for time, temperature,
+        and flow rate are received, ensuring that all relevant data is stored
+        sequentially for further processing or display.
+
+        :param time: The timestamp associated with the new data point.
+        :param temperature: The temperature value of the new data point.
+        :param flowRate: The flow rate value of the new data point.
+        """
         self.time_data.append(time)
         self.temperature_data.append(temperature)
         self.flow_rate_data.append(flowRate)
@@ -832,99 +869,157 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toleranceInput.setEnabled(True)
             
     def updateSettings(self):
+        """
+        Updates the settings for both virtual and SSR heaters based on user inputs.
+        Validates virtual heater settings, adjusts building models for various ambient temperatures,
+        and updates SSR heater settings if enabled.
+        """
         if self.validateVirtualHeaterSettings():
-            # Retrieve values from UI
-            ambient_temp = float(self.ambientTempInput.text())
-            design_power = float(self.designHeatingPowerInput.text())
-            boostHeat = self.virtualHeaterButton.isChecked()
+            # Set a base design heating power for calculations.
+            q_design_e = 5390
+            # Define a range of example ambient temperatures to simulate different conditions.
+            ambient_temperatures = [-10, -7, 2, 7, 12]
+            
+            for t_a in ambient_temperatures:
+                # Adjust design parameters (heating power and flow temperature) for current ambient temperature.
+                q_design_adjusted, t_flow_design_adjusted = self.adjustDesignParameters(t_a, q_design_e)
+                
+                # Generate a building model for the adjusted parameters to simulate heating under current conditions.
+                building_model_parameters = CalcParameters(
+                    t_a=t_a,
+                    q_design=q_design_adjusted,
+                    t_flow_design=t_flow_design_adjusted,
+                    mass_flow=self.currentMassFlow / 1000.0,  # Conversion to kg/s for internal compatibility.
+                    boostHeat=self.virtualHeaterButton.isChecked(),
+                    maxPowBooHea=self.boostHeatPower
+                )
+                building_model = building_model_parameters.createBuilding()
+                
+                # Log the detailed parameters of each generated building model for the specified ambient temperature.
+                self.logToTerminal(f"Building model created for ambient temperature {t_a}°C: "
+                                f"Mass B = {building_model.MassB.mcp} J/K, "
+                                f"ua_ba = {building_model.ua_ba} W/K, "
+                                f"Mass H = {building_model.MassH.mcp} J/K, "
+                                f"ua_hb = {building_model.ua_hb} W/K.")
 
-            try:
-                # Correctly pass the expected number of arguments to updateBuildingModel
-                self.currentBuildingModel = self.updateBuildingModel(ambient_temp, design_power, boostHeat)
-                self.logToTerminal("> Building model updated with current parameters.")
+            # Check the state of the virtual heater button to decide on boost heat activation/deactivation.
+            self.setBoostHeat(self.virtualHeaterButton.isChecked())
 
-                # If SSR settings are separate and need to be updated only when SSR heater is on
-                if self.ssrHeaterButton.isChecked():
-                    # Update SSR settings here
-                    self.logToTerminal("> SSR heater settings updated.")
-            except Exception as e:
-                self.logToTerminal(f"> Failed to update settings: {e}", messageType="error")
         else:
+            # If virtual heater settings validation fails, log a warning to check the inputs.
             self.logToTerminal("> Invalid settings. Please check your inputs.", messageType="warning")
 
-
-        # SSR settings update if SSR heater is on
+        # Update SSR heater settings if the SSR heater button is toggled on.
         if self.ssrHeaterButton.isChecked():
             try:
-                # Retrieve SSR Heater settings
+                # Retrieve current settings from the user interface.
                 targetTemperature = self.targetTempInput.text()
                 tolerance = self.toleranceInput.text()
                 dacVoltage = self.dacVoltageInput.text()
 
-                # Send serial commands to the Arduino for each SSR setting
+                # Send updated settings as serial commands to the Arduino.
                 self.sendSerialCommand(f"setTemp {targetTemperature}")
                 self.sendSerialCommand(f"setTolerance {tolerance}")
                 self.sendSerialCommand(f"setVoltage {dacVoltage}")
                 
+                # Log the successful update of SSR heater settings.
                 self.logToTerminal("> SSR heater settings updated.")
             except ValueError as e:
+                # Catch and log any errors during the SSR settings update process.
                 self.logToTerminal(f"> Error updating SSR settings: {e}", messageType="error")
 
-    def updateBuildingModel(self, t_a, q_design, boostHeat):
+    def setBoostHeat(self, activate):
+        """
+        Set the boost heat state.
+
+        :param activate: A boolean indicating whether to activate (True) or deactivate (False) the boost heat.
+        """
+        if activate:
+            # Activate the boost heater
+            self.sendSerialCommand("activateBoostHeat")
+            self.logToTerminal("> Virtual heater activated.")
+        else:
+            # Deactivate the boost heater
+            self.sendSerialCommand("deactivateBoostHeat")
+            self.logToTerminal("> Virtual heater deactivated.")
+                
+    def updateBuildingModel(self, ambient_temp, q_design, boostHeat):
+        """
+        Updates the building model with new parameters based on ambient temperature and design heating power.
+
+        :param ambient_temp: The current ambient temperature.
+        :param q_design: The initial design heating power.
+        :param boostHeat: Boolean indicating whether the boost heat feature is activated.
+        """
         try:
-            # Parameters for the building model, adjust as necessary
-            t_flow_design = self.currentFlowTemperatureDesign
-            mass_flow = self.currentMassFlow
-            # Call CalcParameters with the correct parameters
+            # Convert the flow rate from liters per second to kilograms per second for model compatibility.
+            mass_flow = self.currentMassFlow / 1000.0
+
+            # Dynamically adjust the design heating power and flow temperature design based on the current ambient temperature.
+            q_design_adjusted, t_flow_design_adjusted = self.adjustDesignParameters(ambient_temp, q_design)
+
+            # Update the current building model instance with the adjusted parameters.
             self.currentBuildingModel = CalcParameters(
-                t_a=t_a,
-                q_design=q_design,
-                t_flow_design=t_flow_design,
+                t_a=ambient_temp,
+                q_design=q_design_adjusted,
+                t_flow_design=t_flow_design_adjusted,
                 mass_flow=mass_flow,
-                delta_T_cond=5,  
-                const_flow=True, 
-                tau_b=55E6 / 263, 
-                tau_h=505E3 / 258,  
-                t_b=20,  # Default or from UI
                 boostHeat=boostHeat,
-                maxPowBooHea=7000  
+                maxPowBooHea=self.boostHeatPower
             ).createBuilding()
-            self.logToTerminal("> Building model created and initialized.")
+            self.logToTerminal("> Building model updated with current parameters.")
         except Exception as e:
-            self.logToTerminal(f"> Failed to create/update building model: {e}", messageType="error")
+            # Log any exceptions that occur during the update process.
+            self.logToTerminal(f"> Failed to update building model: {e}", messageType="error")
 
     def sendSerialCommand(self, command):
+        """
+        Sends a command to the Arduino via the established serial connection.
+
+        :param command: The command string to be sent to the Arduino.
+        """
+        if self.arduinoSerial and self.arduinoSerial.isOpen():
+            # If the serial connection is open, encode and send the command with a newline character.
+            self.arduinoSerial.write((command + '\n').encode()) 
+            self.logToTerminal(f"> Sent to Arduino: {command}")
+        else:
+            # If the serial connection is not established, log an error message.
+            self.logToTerminal("> Error: Serial connection not established.", messageType="error")
+
+    def sendArduinoCommand(self, commandType, value=None):
+        """
+        Send a command to the Arduino based on the command type and value.
+        
+        Parameters:
+        - commandType: A string that specifies the type of command to send ('setVoltage', 'setTemp', 'setTolerance', 'activateVirtualHeater', 'activateSSRHeater').
+        - value: The value associated with the command, if applicable. For 'setVoltage', 'setTemp', and 'setTolerance', this should be the desired setting value. For 'activateVirtualHeater' and 'activateSSRHeater', this can be omitted.
+        """
+        if commandType in ['setVoltage', 'setTemp', 'setTolerance']:
+            if value is not None:
+                command = f"{commandType} {value}"
+            else:
+                print(f"Value required for command type: {commandType}")
+                return
+        elif commandType in ['activateVirtualHeater', 'activateSSRHeater']:
+            command = commandType
+        else:
+            print(f"Unknown command type: {commandType}")
+            return
+        
+        self.sendCommandToArduino(command)
+
+    def sendCommandToArduino(self, command):
+        """
+        Send a command to the Arduino.
+        
+        Parameters:
+        - command: The full command string to send to the Arduino.
+        """
         if self.arduinoSerial and self.arduinoSerial.isOpen():
             self.arduinoSerial.write((command + '\n').encode()) 
             self.logToTerminal(f"> Sent to Arduino: {command}")
         else:
             self.logToTerminal("> Error: Serial connection not established.", messageType="error")
-
-    def setDACVoltage(self):
-        """Send DAC voltage setting command to Arduino."""
-        voltage = self.dacVoltageInput.text()  # Assuming dacVoltageInput is a QLineEdit
-        command = f"setVoltage {voltage}"
-        self.sendCommandToArduino(command)
-
-    def setTargetTemperature(self):
-        """Send target temperature setting command to Arduino."""
-        temperature = self.targetTempInput.text()  # Assuming targetTempInput is a QLineEdit
-        command = f"setTemp {temperature}"
-        self.sendCommandToArduino(command)
-
-    def setTolerance(self):
-        """Send tolerance setting command to Arduino."""
-        tolerance = self.toleranceInput.text()  # Assuming toleranceInput is a QLineEdit
-        command = f"setTolerance {tolerance}"
-        self.sendCommandToArduino(command)
-
-    def activateVirtualHeater(self):
-        """Send command to activate virtual heater."""
-        self.sendCommandToArduino("activateVirtualHeater")
-
-    def activateSSRHeater(self):
-        """Send command to activate SSR heater."""
-        self.sendCommandToArduino("activateSSRHeater")
 
     def stopOperations(self):
         # Stop the QTimer
@@ -953,7 +1048,7 @@ class MainWindow(QtWidgets.QMainWindow):
             background-color: #1E1E1E; 
             color: #D4D4D4; 
             font-family: 'Verdana', monospace;
-            font-size: 12pt;
+            font-size: 10pt;
             padding: 1px;
         """)
         terminal.setReadOnly(True)
@@ -975,47 +1070,6 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Append the formatted message to the terminal
         self.terminal.appendHtml(formattedMessage)
-
-
-    def updateGraph(self):
-        if not self.time_data:  # Check if there's data to plot
-            return
-
-        self.ax.clear()  # Clear previous data
-
-        # Plot temperature vs. time
-        self.ax.plot(self.time_data, self.temperature_data, label='Temperature (°C)', color='#E06C75', linewidth=2)
-        # Plot flow rate vs. time on a secondary y-axis
-        self.ax2 = self.ax.twinx()  # Create a secondary y-axis
-        self.ax2.plot(self.time_data, self.flow_rate_data, label='Flow Rate (L/s)', color='#61AFEF', linewidth=2)
-
-        # Set the face color to match the One Dark Pro theme
-        self.ax.set_facecolor('#282C34')
-        self.ax2.set_facecolor('#282C34')  # Set face color for the secondary y-axis
-
-        # Update tick parameters and spines to match the theme color
-        for ax in [self.ax, self.ax2]:
-            ax.tick_params(axis='x', colors='#ABB2BF', rotation=90)  # Rotate tick labels by 90 degrees for better readability
-            ax.tick_params(axis='y', colors='#ABB2BF')
-            for spine in ax.spines.values():
-                spine.set_color('#ABB2BF')
-
-        # Adjust the number of ticks on the x-axis (every 10th tick)
-        num_ticks = len(self.time_data)
-        if num_ticks > 10:
-            step = num_ticks // 10
-            self.ax.xaxis.set_ticks(self.time_data[::step])
-        
-        # Update axis labels and title
-        self.ax.set_title('Temperature & Flow Rate VS Time', color='#ABB2BF')
-
-        # Show legend
-        lines, labels = self.ax.get_legend_handles_labels()
-        lines2, labels2 = self.ax2.get_legend_handles_labels()
-        self.ax.legend(lines + lines2, labels + labels2, loc='upper left', facecolor='#282C34', edgecolor='#282C34')
-
-        # Redraw the graph with the new data
-        self.graphCanvas.draw()
 
     def exportToCSV(self):
         filePath = r'C:\Users\LAB\Desktop\GUI Testing\HPData.csv' 
