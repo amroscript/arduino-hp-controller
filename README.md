@@ -62,7 +62,7 @@ In order to use this package, you should download the Python/Arduino files.
 
 ## User-interface Preview
 
-![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/d30b31a8-5c83-4e93-84ea-e2d63217f26b)
+![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/29833f88-8ce5-4f73-8e11-02725690f3c1)
 
 ![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/e670c02f-aac0-450f-af79-779538deb5a3)
 
