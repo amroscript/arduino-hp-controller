@@ -1,3 +1,6 @@
+// Author: Amro Farag
+// Date: March 2024
+
 #include <Adafruit_MAX31865.h> // PT100 library
 #include <Wire.h>  // Wire library for I2C communication
 #include <RTClib.h>  // Real Time Clock library
@@ -15,6 +18,7 @@ float targetTemperature = 25.0; // Default target temperature in Celsius
 float tolerance = 0.2; // Temperature tolerance in Celsius
 float desiredVoltage = 0.0; // Desired voltage to be set on the DAC
 float dacVoltage = 0.0;
+float correctionFactor = 0.891;
 
 void setup() {
   Serial.begin(9600); // Begin Serial communication at 9600 baud rate
@@ -93,9 +97,17 @@ float calculateFlowRate(float sensorVoltage) {
 
 // Function to set DAC voltage
 void setDACVoltage(float voltage) {
-  uint16_t dacValue = (uint16_t)((voltage / 10.0) * 4095); // Convert voltage to DAC value (assuming 10V max)
+  // Apply the correction factor to the commanded voltage
+  float correctedVoltage = voltage * correctionFactor;
+
+  // Ensure correctedVoltage is within the DAC's allowable range
+  correctedVoltage = constrain(correctedVoltage, 0.0, 10.0); // Assuming the DAC's range is 0-10V
+
+  uint16_t dacValue = static_cast<uint16_t>((correctedVoltage / 10.0) * 4095);
   dac.setDACOutVoltage(dacValue, 0); // Set voltage on DAC channel 0
-  dacVoltage = voltage; // Update dacVoltage to reflect the actual voltage being set.
+  
+  // Update the global dacVoltage variable to reflect the corrected voltage being set
+  dacVoltage = correctedVoltage;
 }
 
 // Function to control heating based on the current and target temperature
@@ -137,6 +149,12 @@ void processSerialCommand(String command) {
     Serial.print("New DAC voltage: ");
     Serial.println(desiredVoltage);
     setDACVoltage(desiredVoltage); // Update the DAC voltage immediately
+  } else if (command == "activateVirtualHeater") {
+    // Logic to activate the virtual heater
+    Serial.println("Virtual Heater Activated");
+  } else if (command == "activateSSRHeater") {
+    // Logic to switch back to SSR heating mode
+    Serial.println("SSR Heater Activated");
   } else {
     Serial.println("Unknown command");
   }
