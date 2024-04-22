@@ -18,14 +18,12 @@ from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QPushButton, \
     QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QFrame, QPlainTextEdit, \
     QTabWidget, QTableWidget, QTableWidgetItem
-from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
+from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap    
 from PyQt5.QtCore import QTimer, Qt, QSize
 
-
 # Arduino serial connection set-up
-ARDUINO_PORT = 'COM3' # Hard-coded 
+ARDUINO_PORT = 'COM4' # Hard-coded 
 BAUD_RATE = 9600
-
 
 # User-interface theme customization
 def applyOneDarkProTheme(app):
@@ -89,10 +87,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
-        self.arduinoSerial = serial.Serial('COM3', 9600, timeout=1)
+        self.arduinoSerial = serial.Serial('COM4', 9600, timeout=1)
         
         # Define initial values for attributes used in the model
-        self.currentAmbientTemperature =0.0  # NOT Dynamic update
+        self.currentAmbientTemperature = 0.0  # NOT Dynamic update
         self.currentMassFlow = 0.0  # Dynamic update
         self.currentDesignHeatingPower = 5390  # design heating power
         self.currentFlowTemperatureDesign = 55  # flow temperature design
@@ -159,6 +157,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def setupUI(self):
         self.setFont(QFont("Verdana", 12))
         tabWidget = QTabWidget()
+
+        self.setMinimumSize(1000, 1000)  
 
         # Logo Setup
         self.logoLabel = QLabel()
@@ -782,45 +782,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 serialData = self.arduinoSerial.readline().decode('utf-8').strip()
                 print(f"Received serial data: {serialData}")  # Debug print
 
-                # Check if the received data is in key-value pair format
                 if ':' in serialData:
                     dataFields = serialData.split(',')
                     currentTime = time.strftime("%H:%M:%S", time.localtime())
-                    temperature = resistance = dacVoltage = sensorVoltage = flowRate = None
+                    dataDict = {k.strip(): float(v) for k, v in (field.split(':') for field in dataFields)}
 
-                    for field in dataFields:
-                        try:
-                            key, value = field.split(':', 1)
-                            # Update GUI based on the key and log the action
-                            if key.strip() == 'Temp':
-                                temp = float(value)
-                                self.temperatureLabel.setText(f"{temp}°C")
-                            elif key.strip() == 'Res':
-                                resistance = float(value)
-                                self.resistanceLabel.setText(f"{value}Ω")
-                            elif key.strip() == 'DACVolt':
-                                dacVoltage = float(value)
-                                self.dacVoltageLabel.setText(f"{value}V")
-                            elif key.strip() == 'SensorVolt':
-                                sensorVoltage = float(value)
-                                self.sensorVoltageLabel.setText(f"{value}V")
-                            elif key.strip() == 'FlowRate':
-                                flowRate = float(value)
-                                self.flowRateLabel.setText(f"{value}L/s")
-                                self.currentMassFlow = flowRate / 1000.0
-                        except ValueError as ve:
-                            print(f"Error parsing field: {field}. Error: {ve}")
-
-                    # Append valid temperature and flowRate data to the spreadsheet and potentially to the graph
-                    if temperature is not None and flowRate is not None:
-                        self.time_data.append(currentTime)
-                        self.temperature_data.append(temperature)
-                        self.flow_rate_data.append(flowRate)
-                        self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)
+                    # Ensure all needed keys are present in dataDict before calling addToSpreadsheet
+                    if all(key in dataDict for key in ['Temp', 'Res', 'DACVolt', 'SensorVolt', 'FlowRate']):
+                        self.addToSpreadsheet(currentTime, 
+                                            dataDict['Temp'], 
+                                            dataDict['Res'], 
+                                            dataDict['DACVolt'], 
+                                            dataDict['SensorVolt'], 
+                                            dataDict['FlowRate'])
+                        self.temperatureLabel.setText(f"{dataDict['Temp']}°C")
+                        self.resistanceLabel.setText(f"{dataDict['Res']}Ω")
+                        self.dacVoltageLabel.setText(f"{dataDict['DACVolt']}V")
+                        self.sensorVoltageLabel.setText(f"{dataDict['SensorVolt']}V")
+                        self.flowRateLabel.setText(f"{dataDict['FlowRate']}L/s")
                         print("Appended data to spreadsheet.")
-                else:
-                    # Handle or log non-key:value messages if necessary
-                    print(f"Non key-value pair message received: {serialData}")
+                    else:
+                        print("Missing data in serial input, cannot update spreadsheet.")
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
             print(f"SerialException encountered: {e}")
@@ -1072,7 +1054,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.terminal.appendHtml(formattedMessage)
 
     def exportToCSV(self):
-        filePath = r'C:\Users\LAB\Desktop\GUI Testing\HPData.csv' 
+        filePath = r'C:\Users\hvaclab\Desktop\GUI Testing\HPData.csv' 
         with open(filePath, 'w', newline='') as file:
             writer = csv.writer(file)
             # Write the project details
