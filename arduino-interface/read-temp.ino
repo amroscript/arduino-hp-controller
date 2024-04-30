@@ -22,7 +22,7 @@ float correctionFactor = 0.891;
 
 void setup() {
   Serial.begin(9600); // Begin Serial communication at 9600 baud rate
-  while (!Serial) { ; } // Wait for the serial port to connect. Needed for Leonardo only.
+  while (!Serial) { ; } // Wait for the serial port to connect. 
 
   max.begin(MAX31865_4WIRE); // Initialize the MAX31865 RTD sensor in 4-wire configuration
   Serial.println("PT100 sensor initialized.");
@@ -37,7 +37,7 @@ void setup() {
 
   if (dac.begin() == 0) { // Initialize the DAC
     Serial.println("DAC initialized successfully.");
-    dac.setDACOutRange(DFRobot_GP8XXX::eOutputRange10V); // Set DAC output range (0 to 10V for example)
+    dac.setDACOutRange(DFRobot_GP8XXX::eOutputRange10V); // Set DAC output range 
   } else {
     Serial.println("Couldn't initialize DAC. Check wiring!");
     while (1); // Infinite loop if DAC not found
@@ -53,10 +53,10 @@ void loop() {
   }
 
   float temperature = readTemperature(); // Read the current temperature from the RTD sensor
-  float resistance = calculateResistance(); // Calculate resistance based on RTD reading (optional)
-  float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor (optional)
+  float resistance = calculateResistance(); // Calculate resistance based on RTD reading 
+  float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor 
 
-  flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage (optional)
+  flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage
   
   setDACVoltage(desiredVoltage); // Update the DAC output voltage
   controlHeating(temperature, targetTemperature, tolerance); // Control heating element based on temperature
@@ -91,7 +91,7 @@ float readAnalogVoltage(int pin) {
 
 // Function to calculate flow rate based on sensor voltage (Example function, implement according to your sensor)
 float calculateFlowRate(float sensorVoltage) {
-  flowRate = sensorVoltage * (0.35 / 5.0);
+  flowRate = sensorVoltage * (1.0 / 5.0);
   return flowRate;
 }
 
@@ -131,7 +131,7 @@ void sendSerialData(float temperature, float resistance, float dacVoltage, float
   Serial.print(", SensorVolt:");
   Serial.print(sensorVoltage);
   Serial.print(", FlowRate:");
-  Serial.println(flowRate); // Ensure this is the flow rate
+  Serial.println(flowRate, 3); // Ensure this is the flow rate
 }
 
 // Function to process commands received from the serial port
