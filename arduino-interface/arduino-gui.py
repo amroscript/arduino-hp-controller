@@ -89,11 +89,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.arduinoSerial = serial.Serial('COM4', 9600, timeout=1)
         
         # Define initial values for attributes used in the model
-        self.currentAmbientTemperature = 0.0  # NOT Dynamic update
+        self.currentAmbientTemperature = 0  # NOT Dynamic update
         self.currentMassFlow = 0.0  # Dynamic update
-        self.currentDesignHeatingPower = 5390  # design heating power
-        self.currentFlowTemperatureDesign = 55  # flow temperature design
-        self.boostHeatPower = 7000  # boost heat power
+        self.currentDesignHeatingPower = 0  # design heating power
+        self.currentFlowTemperatureDesign = 0  # flow temperature design
+        self.boostHeatPower = 6000  # boost heat power
+
+        # Initialize the update timer
+        self.updateTimer = QTimer(self)
+        self.updateTimer.timeout.connect(self.updateSettings)
+        self.updateTimer.setInterval(1100)
+        self.updateTimer.start() 
 
         self.logoLabel = None
         self.arduinoSerial = None
@@ -130,7 +136,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.arduinoSerial = None  # Initialize arduinoSerial attribute to None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateDisplay)
-        self.timer.start(1000)  # Refresh rate in milliseconds
+        self.timer.start(100)  # Refresh rate in milliseconds
         self.initSerialConnection() # Initialize serial connection with Arduino
 
         self.updateButton.setEnabled(True)
@@ -213,15 +219,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tableWidget.setColumnCount(7)
         self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "DAC Voltage", "Sensor Voltage", "Flow Rate", "Return Temperature"])
 
+        # Table Widget for Spreadsheet Tab
+        self.tableWidget = QTableWidget()
+        self.tableWidget.setColumnCount(7)
+        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "Resistance", "DAC Voltage", "Sensor Voltage", "Flow Rate", "Return Temperature"])
+
         # Set the width of each column in the table
-        self.tableWidget.setColumnWidth(0, 147)
-        self.tableWidget.setColumnWidth(1, 147)
-        self.tableWidget.setColumnWidth(2, 147)
-        self.tableWidget.setColumnWidth(3, 147)
-        self.tableWidget.setColumnWidth(4, 148)
-        self.tableWidget.setColumnWidth(5, 148)
-        self.tableWidget.setColumnWidth(6, 148)
-        self.tableWidget.setColumnWidth(7, 150)
+        self.tableWidget.setColumnWidth(0, 147)  # Time
+        self.tableWidget.setColumnWidth(1, 147)  # Temperature
+        self.tableWidget.setColumnWidth(2, 147)  # Resistance
+        self.tableWidget.setColumnWidth(3, 147)  # DAC Voltage
+        self.tableWidget.setColumnWidth(4, 148)  # Sensor Voltage
+        self.tableWidget.setColumnWidth(5, 148)  # Flow Rate
+        self.tableWidget.setColumnWidth(6, 200) 
 
 
         self.tableWidget.setStyleSheet("""
@@ -271,61 +281,83 @@ class MainWindow(QtWidgets.QMainWindow):
         applyOneDarkProTheme(QApplication.instance())
 
     def initializeBuildingModel(self):
-        if self.validateVirtualHeaterSettings():
-            ambient_temp = float(self.ambientTempInput.text())  # Use ambient temperature from the GUI
-            q_design_e = float(self.designHeatingPowerInput.text())
-            mass_flow = self.currentMassFlow / 1000.0  # Convert L/s to kg/s
-
-            boostHeat = self.virtualHeaterButton.isChecked()
-
-            try:
-                self.currentBuildingModel = CalcParameters(
-                    t_a=ambient_temp,
-                    q_design=q_design_e,
-                    t_flow_design=self.currentFlowTemperatureDesign,
-                    mass_flow=mass_flow,
-                    boostHeat=boostHeat,
-                    maxPowBooHea=self.boostHeatPower
-                ).createBuilding()
-                self.logToTerminal("> Building model initialized with current parameters.")
-            except Exception as e:
-                self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
-        else:
+        if not self.validateVirtualHeaterSettings():
             self.logToTerminal("> Invalid virtual heater settings. Please check your inputs.", messageType="warning")
+            return
+
+        try:
+            ambient_temp = float(self.ambientTempInput.text())
+            q_design_e = float(self.designHeatingPowerInput.text())
+            mass_flow = self.currentMassFlow  # Directly use if currentMassFlow is in L/s
+            print(f"Initializing Building Model with Ambient Temp: {ambient_temp}, Design Heating Power: {q_design_e}, Mass Flow: {mass_flow} kg/s")
+        except ValueError as ve:
+            self.logToTerminal(f"> Error in input conversion: {ve}", messageType="error")
+            return
+
+        if mass_flow <= 0:
+            self.logToTerminal("> Mass flow is zero or negative, which is invalid.", messageType="error")
+            return
+
+        boostHeat = self.virtualHeaterButton.isChecked()
+
+        try:
+            calc_params = CalcParameters(
+                t_a=ambient_temp,
+                q_design=q_design_e,
+                t_flow_design=self.currentFlowTemperatureDesign,
+                mass_flow=mass_flow,
+                boostHeat=boostHeat,
+                maxPowBooHea=self.boostHeatPower
+            )
+            self.currentBuildingModel = calc_params.createBuilding()
+            self.logToTerminal("> Building model initialized with current parameters.")
+        except Exception as e:
+            self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
 
     def tempToVoltage(self, temp):
         # Conversion logic parameters
         min_temp = 0
         max_temp = 100
         min_voltage = 0
-        max_voltage = 10
+        max_voltage = 5
 
         # Calculate the initial voltage from the temperature
         voltage = ((temp - min_temp) / (max_temp - min_temp)) * (max_voltage - min_voltage) + min_voltage
 
-        # Apply the correction factor from your Arduino script
+        # Apply the correction factor from Arduino script
         correction_factor = 0.891
         corrected_voltage = voltage * correction_factor
 
         # Ensure correctedVoltage is within the DAC's allowable range
-        corrected_voltage = max(min(corrected_voltage, max_voltage), min_voltage)  # Clamp to range 0-10V
+        corrected_voltage = max(min(corrected_voltage, max_voltage), min_voltage)  # Clamp to range 0-5V
 
         return corrected_voltage
 
-    def adjustDesignParameters(self, ambient_temp, q_design_e):
+    def adjustDesignParameters(self, ambient_temp, q_design_e, boostHeat):
+        """
+        Adjusts the design parameters based on ambient temperature and modifies boost heating if necessary.
+
+        Args:
+        ambient_temp (float): Current ambient temperature.
+        q_design_e (float): Current design heating power.
+        boostHeat (bool): Current state of boost heating.
+
+        Returns:
+        tuple: Adjusted design heating power, target flow temperature, updated boostHeat state.
+        """
         if ambient_temp <= -10:
-            return q_design_e, 55
+            return q_design_e, 55, True
         elif -10 < ambient_temp <= -7:
-            return q_design_e * 0.885, 52
+            return q_design_e * 0.885, 55, boostHeat
         elif -7 < ambient_temp <= 2:
-            return q_design_e * 0.538, 42
+            return q_design_e * 0.538, 42, boostHeat
         elif 2 < ambient_temp <= 7:
-            return q_design_e * 0.346, 36
+            return q_design_e * 0.346, 36, boostHeat
         elif ambient_temp > 7:
-            return q_design_e * 0.154, 30
+            return q_design_e * 0.154, 30, boostHeat
         else:
             self.logToTerminal(f"> Ambient temperature {ambient_temp}°C is out of expected range.", messageType="warning")
-            return q_design_e, 55  # Return default values if the temperature is out of the expected range
+            return q_design_e, 55, boostHeat
 
     def createMeasurementGroup(self):
         group = QGroupBox("Instructions and Real-time Measurements")
@@ -456,13 +488,30 @@ class MainWindow(QtWidgets.QMainWindow):
             return group
     
     def validateVirtualHeaterSettings(self):
+        """
+        Validates the input settings for the virtual heater to ensure they are within acceptable ranges.
+        Returns True if all settings are valid, False otherwise.
+        """
         try:
-            # Ensure all required fields are filled and valid. Adapt according to your actual inputs
-            float(self.ambientTempInput.text())
-            float(self.initialReturnTempInput.text())
-            float(self.designHeatingPowerInput.text())
-            return True
+            ambient_temp = float(self.ambientTempInput.text())  # Get ambient temperature from user input
+            q_design_e = float(self.designHeatingPowerInput.text())  # Get design heating power from user input
+            t_start_h = float(self.initialReturnTempInput.text())  # Get initial return temperature from user input
+
+            # Validate the converted values are within expected ranges
+            if not -40 <= ambient_temp <= 40:
+                self.logToTerminal("Ambient temperature out of expected range: -40 to 40°C", messageType="warning")
+                return False
+            if q_design_e <= 0:
+                self.logToTerminal("Design heating power must be greater than 0.", messageType="warning")
+                return False
+            if not 10 <= t_start_h <= 90:  # Adjusted upper limit to 90°C
+                self.logToTerminal("Initial return temperature out of expected range: 10 to 90°C", messageType="warning")
+                return False
+
+            return True  # If all checks pass, the settings are valid
         except ValueError:
+            # If any conversion fails, log the failure and return False
+            self.logToTerminal("Invalid input: Please check that all fields contain numeric values.", messageType="warning")
             return False
 
     def updateHeaterButtonState(self):
@@ -519,13 +568,13 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QGridLayout()
 
         # Inputs
-        self.ambientTempInput = QLineEdit("10")
+        self.ambientTempInput = QLineEdit("7")
         self.addSettingWithButtons(layout, "Ambient Temperature (°C):", self.ambientTempInput, 0, font_size=10.5)
         
-        self.designHeatingPowerInput = QLineEdit("5390")
+        self.designHeatingPowerInput = QLineEdit("11590")
         self.addSettingWithButtons(layout, "Design Heating Power (W):", self.designHeatingPowerInput, 1, font_size=10.5)
 
-        self.initialReturnTempInput = QLineEdit("20.0")  
+        self.initialReturnTempInput = QLineEdit("30.0")  
         self.addSettingWithButtons(layout, "Initial Return Temperature (°C):", self.initialReturnTempInput, 2, font_size=10.5)
 
         group.setLayout(layout)
@@ -695,27 +744,6 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             print("Mass flow data is not yet available. Delaying model initialization.")
 
-    def validateVirtualHeaterSettings(self):
-        try:
-            # Attempt to convert the text input from the UI to float
-            ambient_temp = float(self.ambientTempInput.text())
-            design_power = float(self.designHeatingPowerInput.text())
-            initial_return_temp = float(self.initialReturnTempInput.text())
-            
-            # Validate the converted values are within expected ranges
-            if not -40 <= ambient_temp <= 40:
-                raise ValueError("Ambient temperature out of expected range.")
-            if design_power <= 0:
-                raise ValueError("Design heating power must be greater than 0.")
-            if not 10 <= initial_return_temp <= 30:
-                raise ValueError("Initial return temperature out of expected range.")
-            
-            # If all checks pass, return True
-            return True
-        except ValueError:
-            # If any conversion fails or a check doesn't pass, return False
-            return False
-
     def addControlWithButtons(self, layout, lineEdit, row, columnSpan):
         upButton = QPushButton("+")
         downButton = QPushButton("–")
@@ -747,11 +775,11 @@ class MainWindow(QtWidgets.QMainWindow):
         container.setLayout(buttonLayout)
         layout.addWidget(container, row, columnSpan)
 
-    def addToSpreadsheet(self, timeData, temperature, resistance, dacVoltage, voltage, flowRate):
+    def addToSpreadsheet(self, timeData, temperature, resistance, dacVoltage, voltage, flowRate, t_ret):
         """
         Adds a row of data to the spreadsheet.
 
-        This function takes various measurements (timeData, temperature, resistance, dacVoltage, voltage, flowRate)
+        This function takes various measurements (timeData, temperature, resistance, dacVoltage, voltage, flowRate, returnTemp)
         and inserts them into a new row in the spreadsheet. Each parameter corresponds to a specific column in the table.
         It uses exception handling to catch and report any issues that might occur during the data insertion process,
         ensuring the application remains stable even if errors are encountered.
@@ -763,7 +791,7 @@ class MainWindow(QtWidgets.QMainWindow):
         - dacVoltage (float): The DAC voltage setting.
         - voltage (float): The measured sensor voltage.
         - flowRate (float): The measured flow rate.
-        - t_ret (float): The calculated return temperature.
+        - returnTemp (float): The calculated return temperature.
         """
         rowPosition = self.tableWidget.rowCount()
         try:
@@ -772,71 +800,47 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tableWidget.setItem(rowPosition, 1, QTableWidgetItem(str(temperature)))
             self.tableWidget.setItem(rowPosition, 2, QTableWidgetItem(str(resistance)))
             self.tableWidget.setItem(rowPosition, 3, QTableWidgetItem(str(dacVoltage)))
-            self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(str(voltage)))
-            self.tableWidget.setItem(rowPosition, 5, QTableWidgetItem(str(flowRate)))
+            self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(f"{voltage:.2f}"))
+            self.tableWidget.setItem(rowPosition, 5, QTableWidgetItem(f"{flowRate:.3f}"))
+            self.tableWidget.setItem(rowPosition, 6, QTableWidgetItem(f"{t_ret*0.891:.2f}"))  
         except Exception as e:
             print(f"Error adding data to spreadsheet: {e}")
-    
+        
     def updateDisplay(self):
-        """
-        Processes incoming serial data and updates the GUI display accordingly.
-
-        This function reads data sent from the Arduino over the serial connection. It expects the data to be in a specific format,
-        with each piece of data labeled. The function parses this data, updates the display
-        elements in the GUI (like temperature, resistance, etc.), and appends the data to the spreadsheet and graph.
-
-        It incorporates error handling to manage unexpected data formats or communication issues, ensuring the application's stability.
-        Debugging messages are printed to the console for troubleshooting purposes.
-        """
         try:
             if self.arduinoSerial and self.arduinoSerial.in_waiting:
                 serialData = self.arduinoSerial.readline().decode('utf-8').strip()
                 print(f"Received serial data: {serialData}")  # Debug print
 
-                # Check if the received data is in key-value pair format
                 if ':' in serialData:
                     dataFields = serialData.split(',')
                     dataDict = {}
                     for field in dataFields:
-                        parts = field.split(':')
-                        if len(parts) == 2:
-                            key, value = parts
-                            key = key.strip()
-                            try:
-                                value = float(value.strip())
-                            except ValueError:
-                                continue  # Skip if value cannot be converted to float
-                            dataDict[key] = value
-                    
-                    currentTime = time.strftime("%H:%M:%S", time.localtime())
-                    
-                    # Retrieve values from dataDict if available
-                    temperature = dataDict.get('Temp', None)
-                    resistance = dataDict.get('Res', None)
-                    dacVoltage = dataDict.get('DACVolt', None)
-                    sensorVoltage = dataDict.get('SensorVolt', None)
-                    flowRate = dataDict.get('FlowRate', None)
+                        key, value = field.split(':')
+                        if key.strip() == 'FlowRate':
+                            flowRateLPS = float(value.strip())  # Parse the flow rate in l/s
+                            self.currentMassFlow = flowRateLPS * 3600  # l/h if needed elsewhere
+                            print(f"Current Mass Flow from Serial: {self.currentMassFlow} l/h")
+                        dataDict[key.strip()] = float(value.strip())
 
-                    # Update GUI elements only if values are present
-                    if temperature is not None:
-                        self.temperatureLabel.setText(f"{temperature}°C")
-                    if resistance is not None:
-                        self.resistanceLabel.setText(f"{resistance}Ω")
-                    if dacVoltage is not None:
-                        self.dacVoltageLabel.setText(f"{dacVoltage}V")
-                    if sensorVoltage is not None:
-                        self.sensorVoltageLabel.setText(f"{sensorVoltage}V")
-                    if flowRate is not None:
-                        self.flowRateLabel.setText(f"{flowRate}L/s")
+                    if 'Temp' in dataDict and hasattr(self, 'currentBuildingModel') and self.currentBuildingModel:
+                        self.temperatureLabel.setText(f"{dataDict['Temp']}°C")
+                        t_ret_mea = self.currentBuildingModel.t_ret
+                        self.currentBuildingModel.doStep(
+                            t_sup=dataDict['Temp'],
+                            t_ret_mea=t_ret_mea,
+                            m_dot=flowRateLPS,  # Use flowRateLPS directly here
+                            stepSize=1
+                        )
+                        t_ret = self.currentBuildingModel.t_ret
+                        self.resistanceLabel.setText(f"{dataDict.get('Res', 0)}Ω")
+                        self.dacVoltageLabel.setText(f"{dataDict.get('DACVolt', 0)}V")
+                        self.sensorVoltageLabel.setText(f"{dataDict.get('SensorVolt', 0)}V")
+                        self.flowRateLabel.setText(f"{dataDict.get('FlowRate', 0)}L/s")
 
-                    # Append valid data to the spreadsheet and potentially to the graph
-                    if temperature is not None and resistance is not None and dacVoltage is not None \
-                            and sensorVoltage is not None and flowRate is not None:
-                        self.addToSpreadsheet(currentTime, temperature, resistance, dacVoltage, sensorVoltage, flowRate)
-                        print("Appended data to spreadsheet.")
-                else:
-                    # Handle or log non-key:value messages if necessary
-                    print(f"Non key-value pair message received: {serialData}")
+                        if t_ret is not None:
+                            self.addToSpreadsheet(time.strftime("%H:%M:%S", time.localtime()), dataDict['Temp'], dataDict.get('Res', 0), dataDict.get('DACVolt', 0), dataDict.get('SensorVolt', 0), dataDict.get('FlowRate', 0), t_ret)
+
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
             print(f"SerialException encountered: {e}")
@@ -856,41 +860,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.time_data.append(time)
         self.temperature_data.append(temperature)
         self.flow_rate_data.append(flowRate)
-        
-    # def updateGraph(self):
-    #     """Update the graph with new data."""
-    #     print("Attempting to update graph...")
-    #     self.figure.clear()
-    #     ax = self.figure.add_subplot(111)
-
-    #     if len(self.time_data) > 0 and len(self.t_sup_data) > 0 and len(self.t_ret_mea_data) > 0:
-    #         print(f"Plotting data: {len(self.time_data)} points.")
-    #         ax.plot(self.time_data, self.t_sup_data, label='Supply Temperature (°C)', marker='o', linestyle='-', color='limegreen')
-    #         ax.plot(self.time_data, self.t_ret_mea_data, label='Return Temperature (°C)', marker='o', linestyle='-', color='red')
-
-    #         ax.set_xlabel('Time (minutes)')
-    #         ax.set_ylabel('Temperature (°C)')
-    #         ax.set_title('Temperature Profile Over 30 Minutes')
-    #         ax.legend()
-
-    #         self.canvas.draw()
-    #     else:
-    #         print("No data to plot.")
-
-    # def addTemperatureData(self, time_stamp, t_sup, t_ret_mea):
-    #     try:
-    #         t_sup = float(t_sup)
-    #         t_ret_mea = float(t_ret_mea)
-    #         print(f"Adding data: Time: {time_stamp}, Supply Temp: {t_sup}, Return Temp: {t_ret_mea}")
-
-    #         self.t_sup_data.append(t_sup)
-    #         self.t_ret_mea_data.append(t_ret_mea)
-    #         self.time_data.append(time_stamp)
-
-    #         if len(self.time_data) > 0:  # Temporarily changed for debugging
-    #             self.updateGraph()
-    #     except ValueError as e:
-    #         print(f"Error adding data: {e}")
 
     def initButtonClicked(self):
         if self.arduinoSerial is None or not self.arduinoSerial.isOpen():
@@ -909,7 +878,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Restart the QTimer for regular updates
         if not self.timer.isActive():
-            self.timer.start(1000)  # Adjust the interval as necessary
+            self.timer.start(100)  # Adjust the interval as necessary
 
         # Enable buttons upon initialization
         self.stopButton.setEnabled(True)
@@ -920,75 +889,46 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toleranceInput.setEnabled(True)
 
     def updateSettings(self):
-        """
-        Initializes or updates the building model based on user inputs and real-time sensor data.
-        Continuously updates the DAC voltage based on the calculated return temperature from the building model.
-        """
-        if self.validateVirtualHeaterSettings():
-            ambient_temp = float(self.ambientTempInput.text())  # Get user input for ambient temperature
-            q_design_e = float(self.designHeatingPowerInput.text())  # Get user input for design heating power
-
-            # Assuming currentTemperature and currentFlowRate are updated by another function handling real-time Arduino data
-            t_sup = float(self.temperatureLabel.text().strip('°C'))  # Real-time supply temperature
-            flow_rate = float(self.flowRateLabel.text().strip('L/s'))  # Real-time flow rate
-
-            q_design_adjusted, t_flow_design_adjusted = self.adjustDesignParameters(ambient_temp, q_design_e)
-
-            try:
-                # Initialize the building model if it doesn't exist
-                if not hasattr(self, 'currentBuildingModel') or self.currentBuildingModel is None:
-                    self.currentBuildingModel = TwoMassBuilding(
-                        ua_hb=100, 
-                        ua_ba=50,  
-                        mcp_h=1000,  
-                        mcp_b=1500,  
-                        t_a=ambient_temp,
-                        t_start_h=t_sup,
-                        t_flow_design=t_flow_design_adjusted,
-                        q_design_e=q_design_adjusted,
-                        boostHeat=self.virtualHeaterButton.isChecked(),
-                        maxPowBooHea=self.boostHeatPower
-                    )
-
-                # Perform a simulation step using the real-time data
-                self.currentBuildingModel.doStep(
-                    t_sup=t_sup,
-                    t_ret_mea=self.currentBuildingModel.t_ret,
-                    m_dot=flow_rate,
-                    stepSize=1  # Step size in seconds
-                )
-
-                # Retrieve the new return temperature and update DAC voltage
-                t_ret = self.currentBuildingModel.t_ret
-                dacVoltage = self.tempToVoltage(t_ret)
-                self.sendSerialCommand(f"setVoltage {dacVoltage:.2f}")
-
-                self.logToTerminal("> Building model and DAC voltage updated.")
-                print(f"Updated t_ret: {t_ret:.2f}°C, DAC Voltage: {dacVoltage:.2f} V")
-
-            except Exception as e:
-                self.logToTerminal(f"> Failed to update building model: {e}", messageType="error")
-                print(f"Exception in building model update: {e}")
-
-        else:
+        if not self.validateVirtualHeaterSettings():
             self.logToTerminal("> Validation of virtual heater settings failed.", messageType="warning")
-            print("Validation of virtual heater settings failed.")
+            return
 
-        # Handle SSR heater settings update if the SSR heater button is toggled on
-        if self.ssrHeaterButton.isChecked():
-            try:
-                targetTemperature = self.targetTempInput.text()
-                tolerance = self.toleranceInput.text()
-                dacVoltage = self.dacVoltageInput.text()
+        ambient_temp = float(self.ambientTempInput.text())
+        q_design_e = float(self.designHeatingPowerInput.text())
+        boostHeat = self.virtualHeaterButton.isChecked()
 
-                self.sendSerialCommand(f"setTemp {targetTemperature}")
-                self.sendSerialCommand(f"setTolerance {tolerance}")
-                self.sendSerialCommand(f"setVoltage {dacVoltage}")
+        print(f"Updating settings with Ambient Temp: {ambient_temp}, Q Design: {q_design_e}, Boost Heat: {boostHeat}")
 
-                self.logToTerminal("> SSR heater settings updated.")
-            except ValueError as e:
-                self.logToTerminal(f"> Error updating SSR settings: {e}", messageType="error")
-                print(f"Error updating SSR settings: {e}")
+        q_design_adjusted, t_flow_design_adjusted, boostHeatState = self.adjustDesignParameters(ambient_temp, q_design_e, boostHeat)
+        mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert l/h to kg/s (assuming density approximately 1 kg/L)
+
+        print(f"Adjusted Parameters - Q Design: {q_design_adjusted}, Flow Design Temp: {t_flow_design_adjusted}, Boost State: {boostHeatState}, Mass Flow: {mass_flow} kg/s")
+
+        try:
+            self.currentBuildingModel = CalcParameters(
+                t_a=ambient_temp,
+                q_design=q_design_adjusted,
+                t_flow_design=t_flow_design_adjusted,
+                mass_flow=mass_flow,
+                boostHeat=boostHeatState,
+                maxPowBooHea=self.boostHeatPower
+            ).createBuilding()
+
+            # Simulate a step to update t_ret using the latest supply temperature (should be set correctly before this function is called)
+            self.currentBuildingModel.doStep(
+                t_sup=self.currentBuildingModel.t_flow_design,  
+                t_ret_mea=self.currentBuildingModel.t_ret,
+                m_dot=mass_flow,
+                stepSize=1
+            )
+
+            # Update DAC voltage based on new return temperature
+            t_ret = self.currentBuildingModel.t_ret
+            dacVoltage = self.tempToVoltage(t_ret)
+            self.sendSerialCommand(f"setVoltage {dacVoltage:.2f}")
+
+        except Exception as e:
+            self.logToTerminal(f"> Failed to update building model: {e}", messageType="error")
 
     def setBoostHeat(self, activate):
         """
@@ -1005,36 +945,51 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sendSerialCommand("deactivateBoostHeat")
             self.logToTerminal("> Virtual heater deactivated.")
                 
-    def updateBuildingModel(self, ambient_temp):
+    def updateBuildingModel(self):
         """
-        Updates the building model with new parameters based on ambient temperature and design heating power.
-
-        :param ambient_temp: The current ambient temperature.
-        :param q_design: The initial design heating power.
-        :param boostHeat: Boolean indicating whether the boost heat feature is activated.
+        Updates the building model based on the latest known temperature and other parameters.
+        This function logs detailed information about the parameters and results in the process.
         """
-        if self.validateVirtualHeaterSettings():  # Ensure inputs are valid
-                ambient_temp = float(self.ambientTempInput.text())  # Get ambient temperature from user input
-                q_design_e = float(self.designHeatingPowerInput.text())  # Get design heating power from user input
+        if self.validateVirtualHeaterSettings():
+            try:
+                if not self.temperature_data:
+                    print("> No temperature data available.")
+                    return
 
-                # Adjust design parameters based on user inputs
-                q_design_adjusted, t_flow_design_adjusted = self.adjustDesignParameters(ambient_temp, q_design_e)
+                # Use the latest temperature value from the list
+                t_sup = self.temperature_data[-1]
 
-                # Initialize building model with adjusted parameters
-                try:
-                    self.currentBuildingModel = CalcParameters(
-                        t_a=ambient_temp,
-                        q_design=q_design_adjusted,
-                        t_flow_design=t_flow_design_adjusted,
-                        mass_flow=self.currentMassFlow / 1000.0,  # Convert from L/s to kg/s if necessary
-                        boostHeat=self.virtualHeaterButton.isChecked(),
-                        maxPowBooHea=self.boostHeatPower
-                    ).createBuilding()
-                    self.logToTerminal(f"> Building model initialized for ambient temperature {ambient_temp}°C.")
-                except Exception as e:
-                    self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
-                else:
-                    self.logToTerminal("> Invalid settings for virtual heater. Please check your inputs.", messageType="warning")
+                ambient_temp = float(self.ambientTempInput.text())
+                q_design_e = float(self.designHeatingPowerInput.text())
+                boostHeat = self.virtualHeaterButton.isChecked()
+                mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert L/h to kg/s assuming density approximately 1 kg/L
+
+                q_design_adjusted, t_flow_design_adjusted, boostHeatState = self.adjustDesignParameters(ambient_temp, q_design_e, boostHeat)
+
+                calc_params = CalcParameters(
+                    t_a=ambient_temp,
+                    q_design=q_design_adjusted,
+                    t_flow_design=t_flow_design_adjusted,
+                    mass_flow=mass_flow,
+                    boostHeat=boostHeatState,
+                    maxPowBooHea=self.boostHeatPower
+                )
+                self.currentBuildingModel = calc_params.createBuilding()
+
+                # Simulate a step using the most recent t_sup
+                t_ret_mea = self.currentBuildingModel.t_ret
+                self.currentBuildingModel.doStep(t_sup=t_sup, t_ret_mea=t_ret_mea, m_dot=mass_flow, stepSize=1)
+                t_ret_new = self.currentBuildingModel.t_ret
+
+                # Print the details of the computation to the console
+                print(
+                    f"Model step executed with t_sup: {t_sup:.2f}°C, t_ret_mea: {t_ret_mea:.2f}°C, "
+                    f"m_dot: {mass_flow:.3f} kg/s, New t_ret: {t_ret_new:.2f}°C"
+                )
+            except Exception as e:
+                print(f"> Failed to update building model: {e}")
+        else:
+            print("> Invalid settings for virtual heater. Please check your inputs.")
         
     def sendSerialCommand(self, command):
         """
@@ -1045,7 +1000,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.arduinoSerial and self.arduinoSerial.isOpen():
             # If the serial connection is open, encode and send the command with a newline character.
             self.arduinoSerial.write((command + '\n').encode()) 
-            self.logToTerminal(f"> Sent to Arduino: {command}")
         else:
             # If the serial connection is not established, log an error message.
             self.logToTerminal("> Error: Serial connection not established.", messageType="error")
@@ -1119,11 +1073,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "init": "color: #C678DD;"  # Purple
         }
         style = messageStyles.get(messageType, "color: #ABB2BF;")  # Default color
-        
-        # Format the message with HTML tags
         formattedMessage = f"<p style='{style}'>{message}</p>"
-        
-        # Append the formatted message to the terminal
         self.terminal.appendHtml(formattedMessage)
 
     def exportToCSV(self):
