@@ -71,10 +71,18 @@ class TwoMassBuilding:
         else:
             self.q_dot_bh = 0
 
+        print("m_dot:", m_dot)
+        print("t_sup:", t_sup)
+        print("t_ret_mea:", t_ret_mea)
+
         self.q_dot_hp = m_dot*4183*(t_sup-t_ret_mea)
         self.q_dot_hb = self.ua_hb * ((t_sup+self.MassH.T)/2 - self.MassB.T)
         self.q_dot_ba = self.ua_ba * (self.MassB.T - self.t_a)
 
+        print("Calculated values:")
+        print("q_dot_hp:", self.q_dot_hp)
+        print("q_dot_hb:", self.q_dot_hb)
+        print("q_dot_ba:", self.q_dot_ba)
 
     def calc_return(self, t_sup):
         """
@@ -83,7 +91,12 @@ class TwoMassBuilding:
         :param t_sup: current supply temperature
         :return: return temperature
         """
-        t_ret = self.MassH.T
+        t_ret = self.MassH.T 
+
+        print("t_sup:", t_sup)
+        print("Calculated values:")
+        print("t_ret:", t_ret)
+
         return t_ret
 
     def doStep(self, t_sup, t_ret_mea, m_dot, stepSize, q_dot_int = 0):
@@ -109,51 +122,50 @@ class TwoMassBuilding:
         #  calculate new return temperature
         self.t_ret = self.calc_return(t_sup)
 
-class CalcParameters:
-    def __init__(self, t_a, q_design, t_flow_design, mass_flow, delta_T_cond=5, boostHeat=False, maxPowBooHea=7000):
-        """
-        Initialize parameters for a two-mass building model based on the provided system characteristics.
+        # print(f"Finished model step. New t_ret={self.t_ret}")
+        # print(f"Internal heat flow calculations: q_dot_hp={self.q_dot_hp}, q_dot_hb={self.q_dot_hb}, q_dot_ba={self.q_dot_ba}")
+        # print(f"Updated temperatures: MassH.T={self.MassH.T}, MassB.T={self.MassB.T}")
 
-        :param t_a: Ambient temperature [°C]
-        :param q_design: Design heating power [W]
-        :param t_flow_design: Design flow temperature [°C]
-        :param mass_flow: Mass flow [kg/s]
-        :param delta_T_cond: Temperature difference between flow and return in the heating system [°C]
-        :param boostHeat: Indicates if a booster heater is used
-        :param maxPowBooHea: Maximum power of the booster heater [W]
+class CalcParameters:
+    def __init__(self, t_a, q_design, t_flow_design, mass_flow, delta_T_cond=5, const_flow=True,  tau_b=55E6/263,
+                 tau_h=505E3/258, t_b=20, boostHeat = False, maxPowBooHea = 0):
+        """
+        Calculate paramters for two mass building model according to given parameters of a heat pump.
+        Either a mass flow or a temperature difference on condenser has to be provided.
+        @param t_a: nominal outdoor temperature [°C]
+        @param q_design: nominal heating power  [W]
+        @param t_flow_design: nominal flow temperature [°C]
+        @param t_b: nominal building temperature (standard value: 20 °C) [°C]
+        @param mass_flow: mass flow if const_flow = True
+        @param delta_T_cond: temperature difference t_flow-t_ret, if no constant mass flow
+        @param const_flow: True/False calculate parameters with given mass flow (True) or given temperature difference (False)
+        @param mcp_b: heat capacity of building mass [J/K]
+        @param mcp_h: heat capacity of transfer system [J/K]
         """
         self.t_a = t_a
+        self.t_b = t_b
         self.q_design = q_design
         self.t_flow_design = t_flow_design
+        self.const_flow = const_flow
+        self.tau_b = tau_b
+        self.tau_h = tau_h
         self.mass_flow = mass_flow
-        self.delta_T_cond = delta_T_cond
+        if const_flow:
+            self.delta_T_cond=self.q_design/(self.mass_flow*4183)
+        else:
+            self.delta_T_cond=delta_T_cond
+        self.ua_ba = self.q_design / (self.t_b - self.t_a)
+        self.ua_hb = self.q_design / (self.t_flow_design - 0.5*self.delta_T_cond - self.t_b)
+        self.t_start_h = self.t_flow_design - self.delta_T_cond
+        self.mcp_b = self.tau_b * self.ua_ba
+        self.mcp_h = self.tau_h * self.ua_hb
         self.boostHeat = boostHeat
         self.maxPowBooHea = maxPowBooHea
 
-        # Calculate thermal conductivities and capacities
-        self.calculate_parameters()
-
-    def calculate_parameters(self):
-        # Example constants for thermal mass (specific heat capacity * mass)
-        # These should be adjusted to reflect your building and system specifics
-        c_p = 4186  # Specific heat capacity of water J/(kg*K)
-        volume_h = 0.1  # Volume of water in the heating system [m^3]
-        volume_b = 10  # Volume of water equivalent for building thermal mass [m^3]
-        density_water = 997  # Density of water [kg/m^3]
-
-        self.mcp_h = c_p * density_water * volume_h  # Thermal mass of heating system
-        self.mcp_b = c_p * density_water * volume_b  # Thermal mass of building
-
-        # Calculate thermal conductivities
-        self.ua_hb = self.q_design / (self.t_flow_design - 0.5 * self.delta_T_cond - 20)  # Example indoor temp for calculation
-        self.ua_ba = self.q_design / (20 - self.t_a)  # Assuming indoor temperature of 20°C for calculation
-
     def createBuilding(self):
-        """
-        Creates and returns a TwoMassBuilding instance with calculated parameters.
-        """
-        return TwoMassBuilding(ua_hb=self.ua_hb, ua_ba=self.ua_ba, mcp_h=self.mcp_h, mcp_b=self.mcp_b, t_a=self.t_a,
-                               t_start_h=self.t_flow_design - self.delta_T_cond, t_flow_design=self.t_flow_design,
-                               boostHeat=self.boostHeat, maxPowBooHea=self.maxPowBooHea)
-
-
+        building = TwoMassBuilding(ua_hb=self.ua_hb, ua_ba=self.ua_ba, mcp_h=self.mcp_h, mcp_b=self.mcp_b, t_a=self.t_a,
+                                   t_start_h=self.t_start_h, t_start_b=self.t_b, t_flow_design=self.t_flow_design,
+                                   boostHeat=self.boostHeat, maxPowBooHea = self.maxPowBooHea)
+        print("Building created: Mass B = " + str(building.MassB.mcp) + " ua_ba = " + str(building.ua_ba) + "Mass H = "
+              + str(building.MassH.mcp) + " ua_hb = " + str(building.ua_hb))
+        return building
