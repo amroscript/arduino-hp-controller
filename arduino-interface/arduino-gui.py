@@ -100,11 +100,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lastSensorVoltage = '0.00'
         self.lastFlowRate = '0.00'
 
-        # Initialize the update timer
-        self.updateTimer = QTimer(self)
-        self.updateTimer.timeout.connect(self.updateSettings)
-        self.updateTimer.setInterval(1000)
-        self.updateTimer.start() 
+        self.lastUpdateTime = time.time()
+        self.stepSize = 1  # Define how often to update the model in seconds
+
+        # Timer for handling model updates
+        self.modelUpdateTimer = QTimer(self)
+        self.modelUpdateTimer.timeout.connect(self.handleModelUpdate)
+        self.modelUpdateTimer.start(100)  # start with a fast frequency to check conditionally
 
         self.logoLabel = None
         self.arduinoSerial = None
@@ -705,27 +707,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.validateVirtualHeaterSettings():
             self.logToTerminal("> Invalid virtual heater settings. Please check your inputs.", messageType="warning")
             return
-
+    
         try:
             ambient_temp = float(self.ambientTempInput.text())
             default_q_design_e = 3750  # Default design heat power at -10°C
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from l/h to kg/s, ensure non-zero
-            print(f"Initializing Building Model with Ambient Temp: {ambient_temp}, Design Heating Power: {q_design_e}, Mass Flow: {mass_flow:.3f} kg/s")
-        except ValueError as ve:
-            self.logToTerminal(f"> Error in input conversion: {ve}", messageType="error")
-            return
-
-        if mass_flow <= 0.001:
-            self.logToTerminal("> Mass flow is zero or negative, which is invalid.", messageType="error")
-            return
-
-        boostHeat = self.boostHeatPower
-        tau_b = 209125 
-        tau_h = 1957
-        t_b = 20
-
-        try:
+    
             calc_params = CalcParameters(
                 t_a=ambient_temp,
                 q_design=q_design_e,
@@ -733,13 +721,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 mass_flow=mass_flow,
                 boostHeat=boostHeat,
                 maxPowBooHea=self.boostHeatPower,
-                const_flow=True,  
-                t_b=t_b,
-                tau_b=tau_b,  
-                tau_h=tau_h   
+                const_flow=True,
+                t_b=20,
+                tau_b=209125,
+                tau_h=1957
             )
             self.currentBuildingModel = calc_params.createBuilding()
             self.logToTerminal("> Building model initialized with current parameters.", messageType="info")
+    
+            # Set up the timer for updates, if not already done elsewhere
+            self.lastUpdateTime = time.time()
+            self.stepSize = 1  # Define how often to update the model in seconds
+            self.modelUpdateTimer = QTimer(self)
+            self.modelUpdateTimer.timeout.connect(lambda: self.updateBuildingModel(ambient_temp))  # Example supply temperature
+            self.modelUpdateTimer.start(1000)  # Check every second
+            self.logToTerminal("> Building model initialized and timer started.", messageType="info")
+    
         except Exception as e:
             self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
 
@@ -931,39 +928,39 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 
     def updateBuildingModel(self, t_sup):
-        if not self.validateVirtualHeaterSettings():
-            self.logToTerminal("> Invalid settings for virtual heater. Please check your inputs.", messageType="error")
-            return
-
-        if self.currentBuildingModel is None:
-            self.logToTerminal("No building model available. Please initialize the model.", messageType="warning")
-            return
-
-        try:
-            # Ensure the mass flow is a valid number
-            mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert L/h to kg/s and ensure it's not zero
-
-            # self.logToTerminal(f"Updating model with t_sup={t_sup:.2f}°C and mass flow={mass_flow:.3f} kg/s", messageType="update")
-
-            # Perform model update step
-            self.currentBuildingModel.doStep(
-                t_sup=t_sup,
-                t_ret_mea=self.currentBuildingModel.t_ret,
-                m_dot=mass_flow,
-                stepSize=1
-            )
-
-            # Retrieve and log the new return temperature
-            new_return_temp = self.currentBuildingModel.t_ret
-            self.temperatureLabel.setText(f"Updated t_ret: {new_return_temp:.2f}°C")  # UI feedback
-
-            # Convert temperature to voltage for DAC output
-            dac_voltage = self.tempToVoltage(new_return_temp)
-            self.sendSerialCommand(f"setVoltage {dac_voltage:.2f}")
-            # self.logToTerminal(f"Model updated: New t_ret={new_return_temp:.2f}°C, DAC Voltage set to {dac_voltage:.2f}V", messageType="info")
-            
-        except Exception as e:
-            self.logToTerminal(f"> Failed to update building model: {e}", messageType="error")
+        currentTime = time.time()
+        if currentTime - self.lastUpdateTime >= self.stepSize:
+            self.lastUpdateTime = currentTime  # Update the time after the model update
+            if not self.validateVirtualHeaterSettings():
+                self.logToTerminal("> Invalid settings for virtual heater. Please check your inputs.", messageType="error")
+                return
+    
+            if self.currentBuildingModel is None:
+                self.logToTerminal("No building model available. Please initialize the model.", messageType="warning")
+                return
+    
+            try:
+                # Ensure the mass flow is a valid number
+                mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert L/h to kg/s and ensure it's not zero
+    
+                # Perform model update step
+                self.currentBuildingModel.doStep(
+                    t_sup=t_sup,
+                    t_ret_mea=self.currentBuildingModel.t_ret,
+                    m_dot=mass_flow,
+                    stepSize=1
+                )
+    
+                # Retrieve and log the new return temperature
+                new_return_temp = self.currentBuildingModel.t_ret
+                self.temperatureLabel.setText(f"Updated t_ret: {new_return_temp:.2f}°C")  # UI feedback
+    
+                # Convert temperature to voltage for DAC output
+                dac_voltage = self.tempToVoltage(new_return_temp)
+                self.sendSerialCommand(f"setVoltage {dac_voltage:.2f}")
+    
+            except Exception as e:
+                self.logToTerminal(f"> Failed to update building model: {e}", messageType="error")
 
             
     def sendSerialCommand(self, command):
