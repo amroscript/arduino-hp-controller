@@ -720,6 +720,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.logToTerminal("> Mass flow is zero or negative, which is invalid.", messageType="error")
             return
 
+        boostHeat = self.boostHeatPower
+        tau_b = 209125 
+        tau_h = 1957
+        t_b = 20
+
         try:
             calc_params = CalcParameters(
                 t_a=ambient_temp,
@@ -729,9 +734,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 boostHeat=boostHeat,
                 maxPowBooHea=self.boostHeatPower,
                 const_flow=True,  
-                tau_b = 209125, 
-                tau_h = 1957,
-                t_b = 20
+                t_b=t_b,
+                tau_b=tau_b,  
+                tau_h=tau_h   
             )
             self.currentBuildingModel = calc_params.createBuilding()
             self.logToTerminal("> Building model initialized with current parameters.", messageType="info")
@@ -782,7 +787,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Get settings for the closest or default temperature threshold
         partLoadR, q_design, t_flow_design = heat_pump_sizes[closest_temp]
 
-        new_q_design_e = q_design * partLoadR
+        new_q_design_e = q_design
         boostHeat = ambient_temp <= -10  # Boost heating only if very cold
 
         print(f"Ambient Temp: {ambient_temp}, Part Load Ratio: {partLoadR}, New Design Heating Power: {new_q_design_e}, Target Flow Temp: {t_flow_design}")
@@ -1084,7 +1089,7 @@ class MainWindow(QtWidgets.QMainWindow):
             
             # Ensure that voltage and flowRate can be converted to float
             formattedVoltage = f"{voltage:.2f}"
-            formattedFlowRate = f"{flowRate:.3f}"
+            formattedFlowRate = f"{flowRate:.4f}"
             formattedTRet = f"{new_return_temp:.2f}"  
 
             self.tableWidget.setItem(rowPosition, 4, QTableWidgetItem(formattedVoltage))
