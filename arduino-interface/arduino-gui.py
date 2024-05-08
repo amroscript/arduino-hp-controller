@@ -96,7 +96,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.boostHeatPower = 6000  
         
         self.lastDACVoltage = '0.00'
-        self.lastSensorVoltage = '0.00'
+        self.lastSPtemp = '0.00'
         self.lastFlowRate = '0.00'
         self.lastreturnTemperature = '0.00'
 
@@ -105,6 +105,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.updateTimer.timeout.connect(self.updateSettings)
         self.updateTimer.setInterval(1000)
         self.updateTimer.start() 
+
+        # Initialize the loading bar timer
+        self.loadingTimer = QTimer(self)
+        self.loadingTimer.timeout.connect(self.updateLoadingBar)
+        self.loadingStep = 0  # Step count for loading bar
 
         self.logoLabel = None
         self.arduinoSerial = None
@@ -222,18 +227,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # Table Widget for Spreadsheet Tab
         self.tableWidget = QTableWidget()
         self.tableWidget.setColumnCount(6)
-        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "DAC Voltage", "Sensor Voltage", "Flow Rate", "Return Temperature", "SP Temperature"])
+        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "DAC Voltage", "SP Temperature", "Flow Rate", "Return Temperature"])
 
         # Table Widget for Spreadsheet Tab
         self.tableWidget = QTableWidget()
         self.tableWidget.setColumnCount(6)
-        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "DAC Voltage", "Sensor Voltage", "Flow Rate", "Return Temperature", "SP Temperature"])
+        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "DAC Voltage", "SP Temperature", "Flow Rate", "Return Temperature"])
 
         # Set the width of each column in the table
         self.tableWidget.setColumnWidth(0, 200)  # Time
         self.tableWidget.setColumnWidth(1, 200)  # Temperature
         self.tableWidget.setColumnWidth(2, 200)  # DAC Voltage
-        self.tableWidget.setColumnWidth(3, 200)  # Sensor Voltage
+        self.tableWidget.setColumnWidth(3, 200)  # SP Temperature
         self.tableWidget.setColumnWidth(4, 200)  # Flow Rate
         self.tableWidget.setColumnWidth(5, 200)  # Return Temperature Measured
 
@@ -284,6 +289,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # Reapply the One Dark Pro theme to ensure it covers all elements
         applyOneDarkProTheme(QApplication.instance())
 
+    def updateLoadingBar(self):
+        if self.loadingStep < 100:
+            self.loadingStep += 1
+            elapsed = self.loadingStep
+            total = 100
+            percent = (elapsed / total) * 100
+            bar_length = 90  # Adjust the length of the progress bar
+            filled_length = int(round(bar_length * elapsed / float(total)))
+            bar = '█' * filled_length + '-' * (bar_length - filled_length)
+            self.logToTerminal(f"|{bar}| {elapsed}/{total} {percent:.2f}%", messageType="init")
+        else:
+            self.loadingTimer.stop()
+            self.loadingStep = 0  # Reset for next use
+
+    def startLoadingBar(self):
+        self.loadingTimer.start() 
+
     def createMeasurementGroup(self):
         group = QGroupBox("Instructions and Real-time Measurements")
         group.setFont(QFont("Verdana", 11, QFont.Bold))
@@ -323,23 +345,23 @@ class MainWindow(QtWidgets.QMainWindow):
         # Create labels for the data categories
         temperatureLabel = QLabel("↻ Supply Temperature:")
         dacVoltageLabel = QLabel("⇈ DAC Output Voltage:")
-        sensorVoltageLabel = QLabel("Sensor Voltage:")
+        SPVoltageLabel = QLabel("Set Point Temperature:")
         flowRateLabel = QLabel("Flow Rate:")
         returnTemperatureLabel = QLabel("↺ Return Temperature:")  # New return temperature label
 
         # Apply the uniform font to the category labels
-        for label in [temperatureLabel, dacVoltageLabel, sensorVoltageLabel, flowRateLabel, returnTemperatureLabel]:
+        for label in [temperatureLabel, dacVoltageLabel, SPVoltageLabel, flowRateLabel, returnTemperatureLabel]:
             label.setFont(uniform_font)
 
         # Initialize the data labels with default values
         self.temperatureLabel = QLabel("0°C")
         self.dacVoltageLabel = QLabel("0V")
-        self.sensorVoltageLabel = QLabel("0V")
+        self.SPVoltageLabel = QLabel("0°C")
         self.flowRateLabel = QLabel("0L/s")
         self.returnTemperatureLabel = QLabel("0°C")  # Initialize return temperature label
 
         # Apply the uniform font to the data labels
-        for data_label in [self.temperatureLabel, self.dacVoltageLabel, self.sensorVoltageLabel, self.flowRateLabel, self.returnTemperatureLabel]:
+        for data_label in [self.temperatureLabel, self.dacVoltageLabel, self.SPVoltageLabel, self.flowRateLabel, self.returnTemperatureLabel]:
             data_label.setFont(uniform_font)
 
         # Add the labels and data labels to the layout
@@ -347,8 +369,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dataLayout.addWidget(self.temperatureLabel, 1, 1)
         dataLayout.addWidget(returnTemperatureLabel, 2, 0)  # Position the return temperature label
         dataLayout.addWidget(self.returnTemperatureLabel, 2, 1)  # Position the return temperature data label
-        dataLayout.addWidget(sensorVoltageLabel, 3, 0)
-        dataLayout.addWidget(self.sensorVoltageLabel, 3, 1)
+        dataLayout.addWidget(SPVoltageLabel, 3, 0)
+        dataLayout.addWidget(self.SPVoltageLabel, 3, 1)
         dataLayout.addWidget(flowRateLabel, 4, 0)
         dataLayout.addWidget(self.flowRateLabel, 4, 1)
         dataLayout.addWidget(dacVoltageLabel, 5, 0)
@@ -724,11 +746,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.logToTerminal("> Mass flow is zero or negative, which is invalid.", messageType="error")
             return
 
-        boostHeat = self.boostHeatPower
-        tau_b = 209125 
-        tau_h = 600
-        t_b = 20
-
         try:
             calc_params = CalcParameters(
                 t_a=ambient_temp,
@@ -738,9 +755,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 boostHeat=boostHeat,
                 maxPowBooHea=self.boostHeatPower,
                 const_flow=True,  
-                t_b=t_b,
-                tau_b=tau_b,  
-                tau_h=tau_h   
+                tau_b = 209125, 
+                tau_h = 1957,
+                t_b = 20 
             )
             self.currentBuildingModel = calc_params.createBuilding()
             self.logToTerminal("> Building model initialized with current parameters.", messageType="info")
@@ -791,13 +808,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # Get settings for the closest or default temperature threshold
         partLoadR, q_design, t_flow_design = heat_pump_sizes[closest_temp]
 
-        new_q_design_e = q_design
+        new_q_design_e = q_design * partLoadR
         boostHeat = ambient_temp <= -10  # Boost heating only if very cold
 
-        print(f"Ambient Temp: {ambient_temp}, Part Load Ratio: {partLoadR}, New Design Heating Power: {new_q_design_e}, Target Flow Temp: {t_flow_design}")
+        print(f"Ambient Temp: {ambient_temp}, Part Load Ratio: {partLoadR}, Default Design Heating Power: {new_q_design_e}, Target Flow Temp: {t_flow_design}")
 
         return new_q_design_e, t_flow_design, boostHeat
-
 
     def updateDisplay(self):
         try:
@@ -834,9 +850,15 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.dacVoltageLabel.setText(f"{dacVoltage} V")
                     self.lastDACVoltage = dacVoltage
 
-                    sensorVoltage = dataDict.get('SensorVolt', self.lastSensorVoltage)
-                    self.sensorVoltageLabel.setText(f"{sensorVoltage} V")
-                    self.lastSensorVoltage = sensorVoltage
+                    # Update to use return temperature from the model
+                    if self.currentBuildingModel:
+                        model_return_temp = self.currentBuildingModel.t_ret
+                        if model_return_temp >= 0:
+                            self.SPVoltageLabel.setText(f"{model_return_temp:.2f} °C")
+                            self.lastSPtemp = model_return_temp
+                        else:
+                            self.SPVoltageLabel.setText("")  # or any other placeholder to indicate invalid data
+
 
                     flowRate = dataDict.get('FlowRate', self.lastFlowRate)
                     self.flowRateLabel.setText(f"{flowRate} L/s")
@@ -848,7 +870,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.flowRateLabel.setText(f"{flowRateLPS:.3f} L/s")
                         
                         if self.currentBuildingModel:
-                            self.addToSpreadsheet(time.strftime("%H:%M:%S", time.localtime()), dataDict['STemp'], dacVoltage, sensorVoltage, flowRate, dataDict.get('RTemp', 'N/A'))
+                            self.addToSpreadsheet(time.strftime("%H:%M:%S", time.localtime()), dataDict['STemp'], dacVoltage, model_return_temp, flowRate, dataDict.get('RTemp', 'N/A'))
 
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
@@ -939,15 +961,15 @@ class MainWindow(QtWidgets.QMainWindow):
             except ValueError:
                 print(f"Error parsing field: {field}. Expected format 'key:value'.")
         return data_dict
-
-                
+    
     def updateBuildingModel(self, t_sup, t_ret_mea):
         if not self.validateVirtualHeaterSettings():
             self.logToTerminal("> Invalid settings for virtual heater. Please check your inputs.", messageType="error")
             return
 
         if self.currentBuildingModel is None:
-            self.logToTerminal("No building model available. Please initialize the model.", messageType="warning")
+            self.logToTerminal("No building model available. Initializing model..", messageType="warning")
+            self.startLoadingBar()
             return
 
         try:
@@ -1070,7 +1092,7 @@ class MainWindow(QtWidgets.QMainWindow):
         - dacVoltage (float): The DAC voltage setting.
         - voltage (float): The measured sensor voltage.
         - flowRate (float): The measured flow rate.
-        - returnTemp (float): The calculated return temperature.
+        - returnTemp (float): The measured return temperature.
         """
         # Ensure that input data can be converted to float where necessary
         try:
@@ -1079,6 +1101,12 @@ class MainWindow(QtWidgets.QMainWindow):
             voltage = float(voltage) if voltage != 'N/A' else 'N/A'
             flowRate = float(flowRate) if flowRate != 'N/A' else 'N/A'
             returnTemperature = float(returnTemperature) if returnTemperature != 'N/A' else 'N/A'
+
+            # Check if any of the key measurements are zero and skip adding the row if so
+            if any(value == 0 for value in [temperature, dacVoltage, voltage, flowRate, returnTemperature] if value != 'N/A'):
+                self.logToTerminal("Skipping addition to spreadsheet due to zero value.", messageType="warning")
+                return
+
         except ValueError as e:
             self.logToTerminal(f"Error converting data types in addToSpreadsheet: {e}", messageType="error")
             return
@@ -1086,12 +1114,9 @@ class MainWindow(QtWidgets.QMainWindow):
         rowPosition = self.tableWidget.rowCount()
         self.tableWidget.insertRow(rowPosition)
 
-        data = [timeData, str(temperature), str(dacVoltage), str(voltage), str(flowRate), str(returnTemperature)]
+        data = [timeData, f"{temperature:.2f}", f"{dacVoltage:.2f}", f"{voltage:.2f}", f"{flowRate:.2f}", f"{returnTemperature:.2f}"]
         for index, item in enumerate(data):
-            if item == 'N/A':
-                self.tableWidget.setItem(rowPosition, index, QTableWidgetItem(item))
-            else:
-                self.tableWidget.setItem(rowPosition, index, QTableWidgetItem(f"{item:.2f}" if isinstance(item, float) else item))
+            self.tableWidget.setItem(rowPosition, index, QTableWidgetItem(item))
 
     def exportToCSV(self):
         """
