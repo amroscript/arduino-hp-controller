@@ -7,7 +7,6 @@
 #include "DFRobot_GP8XXX.h" // Digital-to-Analog Converter (DAC) library
 
 // Initialize the MAX31865 RTD sensor, RTC, and DAC with their respective settings
-Adafruit_MAX31865 max = Adafruit_MAX31865(53); // CS pin for MAX31865
 RTC_DS3231 rtc; // Real Time Clock (RTC) object
 DFRobot_GP8403 dac(DFGP8XXX_I2C_DEVICEADDR, RESOLUTION_12_BIT); // DAC object
 
@@ -21,11 +20,8 @@ float dacVoltage = 0.0;
 float correctionFactor = 0.891;
 
 void setup() {
-  Serial.begin(9600); // Begin Serial communication at 9600 baud rate
+  Serial.begin(115200); // Begin Serial communication at 115200 baud rate
   while (!Serial) { ; } // Wait for the serial port to connect. 
-
-  max.begin(MAX31865_4WIRE); // Initialize the MAX31865 RTD sensor in 4-wire configuration
-  Serial.println("PT100 sensor initialized.");
 
   if (!rtc.begin()) { // Check if the RTC is connected and working
     Serial.println("Couldn't find RTC");
@@ -52,34 +48,34 @@ void loop() {
     processSerialCommand(command); // Process the received serial command
   }
 
-  float temperature = readTemperature(); // Read the current temperature from the RTD sensor
-  float resistance = calculateResistance(); // Calculate resistance based on RTD reading 
+  float temperature = readTemperature(A2); 
   float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor 
+  float returnTemperature = readreturnTemperature(A1);
 
   flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage
   
   setDACVoltage(desiredVoltage); // Update the DAC output voltage
   controlHeating(temperature, targetTemperature, tolerance); // Control heating element based on temperature
 
-  sendSerialData(temperature, resistance, desiredVoltage, sensorVoltage, flowRate); // Send data over serial
+  sendSerialData(temperature, desiredVoltage, sensorVoltage, flowRate, returnTemperature); // Send data over serial
 
-  delay(1000); // Delay for a second before repeating the loop
+  delay(750); // Delay for a second before repeating the loop
 }
 
-// Function to read temperature from the RTD sensor
-float readTemperature() {
-  uint16_t rtd = max.readRTD();
-  float ratio = rtd / 32768.0;
-  float resistance = ratio * 430; // Assuming a 430 Ohm reference resistor
-  float temperature = max.temperature(100, 430); // Calculate temperature (100 Ohm at 0°C, 430 Ohm reference resistor)
+
+float readTemperature(int pin) {
+  int supSensorValue = analogRead(pin);
+  float voltage = supSensorValue * (5.0 / 1023.0); // Convert the sensor reading to a voltage (0V to 5V)
+  float temperature = (voltage * 70.0) / 5.0; // The voltage range 0V to 5V corresponds to temperature range 0°C to 70°C
   return temperature;
 }
 
-// Function to calculate resistance (Optional if you need direct resistance values)
-float calculateResistance() {
-  uint16_t rtd = max.readRTD();
-  float ratio = rtd / 32768.0;
-  return ratio * 430; // Assuming a 430 Ohm reference resistor
+ // Function to read temperature from (more stable) temperature sensor
+float readreturnTemperature(int pin) { 
+  int retsensorValue = analogRead(pin);
+  float voltage = retsensorValue * (5.0 / 1023.0); // Convert the sensor reading to a voltage (0V to 5V)
+  float returnTemperature = (voltage * 70.0) / 5.0; // The voltage range 0V to 5V corresponds to temperature range 0°C to 70°C
+  return returnTemperature;
 }
 
 // Function to read analog voltage
@@ -88,6 +84,7 @@ float readAnalogVoltage(int pin) {
   float voltage = sensorValue * (5.0 / 1023.0); // Convert to voltage (assuming 5V reference)
   return voltage;
 }
+
 
 // Function to calculate flow rate based on sensor voltage (Example function, implement according to your sensor)
 float calculateFlowRate(float sensorVoltage) {
@@ -101,7 +98,7 @@ void setDACVoltage(float voltage) {
   float correctedVoltage = voltage * correctionFactor;
 
   // Ensure correctedVoltage is within the DAC's allowable range
-  correctedVoltage = constrain(correctedVoltage, 0.0, 10.0); // Assuming the DAC's range is 0-10V
+  correctedVoltage = constrain(correctedVoltage, 0.0, 10.0); // Assuming the DAC's range is 0-5V
 
   uint16_t dacValue = static_cast<uint16_t>((correctedVoltage / 10.0) * 4095);
   dac.setDACOutVoltage(dacValue, 0); // Set voltage on DAC channel 0
@@ -120,19 +117,19 @@ void controlHeating(float currentTemperature, float targetTemp, float tempTolera
 }
 
 // Function to send collected data over serial
-void sendSerialData(float temperature, float resistance, float dacVoltage, float sensorVoltage, float flowRate) {
-  // Ensure the correct variables are being sent
-  Serial.print("Temp:");
+void sendSerialData(float temperature, float dacVoltage, float sensorVoltage, float flowRate, float returnTemperature) {
+  Serial.print("STemp:");
   Serial.print(temperature);
-  Serial.print(", Res:");
-  Serial.print(resistance);
   Serial.print(", DACVolt:");
-  Serial.print(dacVoltage); // Ensure this is the DAC voltage
+  Serial.print(dacVoltage);
   Serial.print(", SensorVolt:");
   Serial.print(sensorVoltage);
   Serial.print(", FlowRate:");
-  Serial.println(flowRate, 3); // Ensure this is the flow rate
+  Serial.print(flowRate, 3);
+  Serial.print(", RTemp:");
+  Serial.println(returnTemperature);
 }
+
 
 // Function to process commands received from the serial port
 void processSerialCommand(String command) {
