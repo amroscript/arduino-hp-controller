@@ -17,7 +17,6 @@ In order to use this package, you should download the Python/Arduino files.
 
 3. This project also requires the following Arduino libraries: 
 
-    - Adafruit_MAX31865 (Optional)
     - Wire (bundled with the Arduino IDE)
     - RTClib
     - DFRobot_GP8XXX
