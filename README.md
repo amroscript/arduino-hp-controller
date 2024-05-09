@@ -1,149 +1,148 @@
-# arduino-hp-controller for heat pump systems
-This repository consists of an Arduino-driven controller is designed to monitor and control heat-pump parameters in real-time, offering an interface for initialization, settings updates, and operations management with feedback through a terminal display and with a functionality to export data.
+# Arduino Heat Pump Controller
+
+This repository contains a comprehensive Arduino-driven controller designed to monitor and control heat pump systems in real-time. The interface supports initialization, settings updates, operational management, and data export, with feedback provided through a terminal display.
 
 ## Installation 
 
-In order to use this package, you should download the Python/Arduino files. 
+To use this package, follow these steps:
 
-1. Download or clone the repository via git: 
+1. **Download or Clone the Repository:**
 
-    `git clone https://github.com/amroscript/arduino-hp-controller/`
+    ```bash
+    git clone https://github.com/amroscript/arduino-hp-controller/
+    ```
 
-2. Install required Python libraries. Navigate to the cloned repository directory and install the required Python packages using pip:
+2. **Install Required Python Libraries:**
+   
+    Navigate to the cloned repository directory and install the required Python packages using pip:
 
-    `pip install -r requirements.txt`
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-    If you are using VSCode, ensure you have the Arduino extension (e.g., "Arduino for Visual Studio Code" by Microsoft) installed.
+    If using VSCode, ensure you have the Arduino extension (e.g., "Arduino for Visual Studio Code" by Microsoft) installed.
 
-3. This project also requires the following Arduino libraries: 
+3. **Install Required Arduino Libraries:**
 
-    - Wire (bundled with the Arduino IDE)
-    - RTClib
-    - DFRobot_GP8XXX
-  
-    > Open the Arduino IDE.
-    > Go to `Sketch` > `Include Library` > `Manage Libraries...`
-    > In the Library Manager, search for each library listed above and install it.
+    - **Adafruit_MAX31865**
+    - **Wire** (bundled with the Arduino IDE)
+    - **RTClib**
+    - **DFRobot_GP8XXX**
+
+    Steps to install:
+    
+    1. Open the Arduino IDE.
+    2. Go to `Sketch` > `Include Library` > `Manage Libraries...`
+    3. Search for each library listed above and install it.
 
 ## Software Documentation
 
-1. If using _mock-testing_ to mimick an arduino environment for the controller:
+### Mock Testing (Simulated Environment)
 
-    – Establish a bidirectional serial stream using socat (macOS) or com0com (Windows).
+1. **Establish Virtual Serial Ports:**
 
-    The socat command will create two interconnected virtual serial ports, whilst com0com is a port emulator. If using MacOS a terminal and enter: 
+    - **macOS (using `socat`):**
 
-    `socat -d -d pty,raw,echo=0 pty,raw,echo=0` 
+        ```bash
+        socat -d -d pty,raw,echo=0 pty,raw,echo=0
+        ```
 
-    Note the output from this command, which will give you the paths to the virtual serial ports.
+        Note the paths to the virtual serial ports provided in the output.
 
-    Alternatively follow this link for com0com instructions: https://com0com.sourceforge.net/.
+    - **Windows (using `com0com`):**
 
-    – Update the Arduino port in your script. With the virtual serial ports created, you'll need to update the ARDUINO_PORT variable in your Python script(s) to match one of the virtual ports created by your emulators.
+        Follow [com0com instructions](https://com0com.sourceforge.net/).
 
-    For example, if socat outputted /dev/pts/3 and /dev/pts/4, you would set ARDUINO_PORT = '/dev/pts/3' in your Python script.
+2. **Update Arduino Port in Script:**
 
-2. If heat pump set-up is available, use _arduino-interface_ directly:
+    Set the `ARDUINO_PORT` variable in your Python script to match one of the virtual ports created. For example, if `socat` outputted `/dev/pts/3` and `/dev/pts/4`, set:
 
-    – **Connect the Arduino:** Ensure the Arduino is connected to the PC via USB and configured with the correct sensors and actuators.
+    ```python
+    ARDUINO_PORT = '/dev/pts/3'
+    ```
 
-    – **Launch the Application:** Run the Python script to open the GUI.
+### Direct Heat Pump Setup
 
-    – **Set COM Port:** Adjust the `ARDUINO_PORT` variable if necessary to match the Arduino's COM port.
+1. **Connect the Arduino:**
+   
+    Ensure the Arduino is connected to the PC via USB and properly configured with sensors and actuators.
 
-    – **Initialize System:** Click the "Initialize" button to start communication with the Arduino.
+2. **Launch the Application:**
 
-    – **Adjust Settings:** Set the target temperature, tolerance, and DAC voltage as required.
+    Run the Python script to open the GUI.
 
-    – **Monitor Data:** Observe real-time data updates in both table and graph views.
+3. **Set COM Port:**
 
-    – **Export Data:** Click the "Export to CSV" button to save the data for offline analysis.
+    Adjust the `ARDUINO_PORT` variable to match the Arduino's COM port.
 
-## User-interface Preview
+4. **Initialize System:**
 
-![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/29833f88-8ce5-4f73-8e11-02725690f3c1)
+    Click the "Initialize" button to start communication with the Arduino.
 
-![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/e670c02f-aac0-450f-af79-779538deb5a3)
+5. **Adjust Settings:**
+
+    Set the target temperature, tolerance, and DAC voltage as required.
+
+6. **Monitor Data:**
+
+    Observe real-time data updates in both table and graph views.
+
+7. **Export Data:**
+
+    Click the "Export to CSV" button to save the data for offline analysis.
+
+## User-Interface Preview
+
+![Controls Monitor](https://github.com/amroscript/arduino-hp-controller/assets/163342561/29833f88-8ce5-4f73-8e11-02725690f3c1)
+
+![Temperature Graph](https://github.com/amroscript/arduino-hp-controller/assets/163342561/e670c02f-aac0-450f-af79-779538deb5a3)
 
 ## Hardware Documentation
 
-**Components Required**
+### Components Required
 
-– Arduino Board (Mega 2560): Central processing unit for the controller, managing sensor data readings and actuator responses.
+- **Arduino Mega 2560:** Central processing unit for the controller, managing sensor data readings and actuator responses.
+- **Adafruit MAX31865 RTD Sensor:** Essential for monitoring heat pump performance.
+- **RTC DS3231 Real-Time Clock Module:** Provides accurate timekeeping for data logging and scheduling tasks.
+- **DFRobot GP8403 DAC Module:** Controls analog variables such as outputting voltage levels.
+- **Digital Relay Module (Optional):** Controls higher power components like heaters or pumps.
+- **Wiring and Connectors:** Ensure proper connection between the Arduino, sensors, actuators, and peripherals.
+- **Power Supply:** Adequate power source for the Arduino and all connected hardware components.
 
-– Adafruit MAX31865 RTD Sensor: Sensor for reading temperatures, essential for monitoring the heat pump performance.
+**Initialization checks in `_read-temp.ino` script verify wiring and integration before testing.**
 
-– RTC DS3231 Real-Time Clock Module: Provides accurate timekeeping for data logging and scheduling tasks.
+### Wiring Overview
 
-– DFRobot GP8403 DAC Module: Used for controlling analog variables within the system, such as outputting voltage levels.
-
-– Digital Relay Module (optional): For controlling higher power components such as heaters or pumps, based on the Arduino's output signals.
-
-– Wiring and Connectors: Ensure proper connection between the Arduino, sensors, actuators, and other peripherals.
-
-– Power Supply: Adequate power source for the Arduino and all connected hardware components.
-
-_Note the initilization checks within the _read-temp.ino_ script to verify wiring and integration before testing._
-
-
-**Wiring Overview**  
-
-MAX31865 RTD Sensor:
-
-    VCC to Mega 5V.
-
-    GND to Mega GND.
-
-    SDI (MOSI) to Mega pin 51.
-
-    SDO (MISO) to Mega pin 50.
-
-    CLK to Mega pin 52.
-
-    CS to a selectable digital pin, e.g., pin 10.
-    
-    RTD wires connected to the RTD screw terminals.
-
- DFRobot_GP8XXX DAC:
-
-    VCC to Mega 5V.
+- **MAX31865 RTD Sensor:**
   
-    GND to Mega GND.
-  
-    SCL to Mega pin 21 (also labeled as SCL).
-  
-    SDA to Mega pin 20 (also labeled as SDA).
-  
-    The DAC's analog output to your actuator's control input.
+  - VCC to Mega 5V.
+  - GND to Mega GND.
+  - SDI (MOSI) to Mega pin 51.
+  - SDO (MISO) to Mega pin 50.
+  - CLK to Mega pin 52.
+  - CS to a selectable digital pin, e.g., pin 10.
+  - RTD wires connected to the RTD screw terminals.
 
-RTC DS3231:
+- **DFRobot GP8403 DAC:**
 
-    VCC to Mega 5V.
-  
-    GND to Mega GND.
-  
-    SCL to Mega pin 21 (also labeled SCL).
-  
-    SDA to Mega pin 20 (also labeled SDA).
+  - VCC to Mega 5V.
+  - GND to Mega GND.
+  - SCL to Mega pin 21 (SCL).
+  - SDA to Mega pin 20 (SDA).
+  - DAC's analog output to your actuator's control input.
 
-Heating Control (Relay Module):
+- **RTC DS3231:**
 
-    VCC (Relay module) to Mega 5V.
-  
-    GND (Relay module) to Mega GND.
-  
-    IN (Relay module) to a digital pin on Mega, e.g., pin 5.
-  
-    Heating element's power circuit connected through the relay.
+  - VCC to Mega 5V.
+  - GND to Mega GND.
+  - SCL to Mega pin 21 (SCL).
+  - SDA to Mega pin 20 (SDA).
 
+- **Heating Control (Relay Module):**
 
+  - VCC (Relay module) to Mega 5V.
+  - GND (Relay module) to Mega GND.
+  - IN (Relay module) to a digital pin on Mega, e.g., pin 5.
+  - Heating element's power circuit connected through the relay.
 
-_The Mega 2560 provides multiple ground and voltage pins, so you can easily expand your project with more sensors or actuators._
-
-_The Mega 2560 has a dedicated SPI header close to the digital pins 50 (MISO), 51 (MOSI), and 52 (CLK), which is convenient for SPI devices like the MAX31865._
-
-_The I2C pins (20 for SDA and 21 for SCL) on the Mega are in a different location than on the Uno, so always refer to the Mega's pinout when connecting I2C devices like the DS3231 RTC and the DAC module._
-
-
-
-
+_The Mega 2560 offers multiple ground and voltage pins for easy expansion with additional sensors or actuators. It has a dedicated SPI header convenient for devices like the MAX31865 and specific I2C pins for the DS3231 RTC and DAC module._
