@@ -21,7 +21,6 @@ In order to use this package, you should download the Python/Arduino files.
     - RTClib
     - DFRobot_GP8XXX
 
-
     1. Open the Arduino IDE.
     2. Go to `Sketch` > `Include Library` > `Manage Libraries...`
     3. In the Library Manager, search for each library listed above and install it.
