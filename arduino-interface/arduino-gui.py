@@ -222,7 +222,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dateInput.setMaximumWidth(300)
         self.exportCSVButton = QPushButton("Export to CSV")
         self.exportCSVButton.clicked.connect(self.exportToCSV)
-        self.exportCSVButton.setStyleSheet("font-size: 11pt;")
+        self.exportCSVButton.setStyleSheet("font-size: 10pt;")
         
         headerLayout.addWidget(self.projectNumberInput)
         headerLayout.addWidget(self.clientNameInput)
@@ -247,7 +247,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 gridline-color: #3B4048;
                 selection-background-color: #3E4451;
                 selection-color: #ABB2BF;
-                font-size: 12pt;
+                font-size: 11pt;
             }
             QTableWidget::item {
                 padding: 5px;
