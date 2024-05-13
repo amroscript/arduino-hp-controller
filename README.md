@@ -93,9 +93,9 @@ To use this package, follow these steps:
 
 ## User-Interface Preview
 
-![Controls Monitor](https://github.com/amroscript/arduino-hp-controller/assets/163342561/29833f88-8ce5-4f73-8e11-02725690f3c1)
+![Controls Monitor](![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/33f5a942-7f26-4204-b4cc-4ef085dc6e80)
 
-![Temperature Graph](https://github.com/amroscript/arduino-hp-controller/assets/163342561/e670c02f-aac0-450f-af79-779538deb5a3)
+![Data Spreadsheet](![image](https://github.com/amroscript/arduino-hp-controller/assets/163342561/cfe2c823-f822-44fd-aee5-7dfa7e3e4cf5)
 
 ## Hardware Documentation
 
