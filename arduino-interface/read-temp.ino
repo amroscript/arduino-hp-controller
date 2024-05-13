@@ -146,12 +146,6 @@ void processSerialCommand(String command) {
     Serial.print("New DAC voltage: ");
     Serial.println(desiredVoltage);
     setDACVoltage(desiredVoltage); // Update the DAC voltage immediately
-  } else if (command == "activateVirtualHeater") {
-    // Logic to activate the virtual heater
-    Serial.println("Virtual Heater Activated");
-  } else if (command == "activateSSRHeater") {
-    // Logic to switch back to SSR heating mode
-    Serial.println("SSR Heater Activated");
   } else {
     Serial.println("Unknown command");
   }
