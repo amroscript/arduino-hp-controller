@@ -101,6 +101,11 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.hasBeenInitialized = False
 
+        self.model_initialized = False
+        self.boost_heater_on = False
+        self.initialization_time = None
+
+
         self.logoLabel = None
         self.timer = None
         self.time_data = []
@@ -148,7 +153,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.updateButton.setEnabled(True)
         self.stopButton.setEnabled(True)
         self.virtualHeaterButton.setEnabled(True)
-        self.ssrHeaterButton.setEnabled(True)
         self.dacVoltageInput.setEnabled(False)
         self.targetTempInput.setEnabled(False)
         self.toleranceInput.setEnabled(False)
@@ -287,7 +291,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tabWidget.addTab(controlsTab, "Controls Monitor")
         tabWidget.addTab(spreadsheetTab, "Data Spreadsheet")
         tabWidget.addTab(self.graphTab, "Temperature Graph")
-
+        
         self.setCentralWidget(tabWidget)
         applyOneDarkProTheme(QApplication.instance())
         
@@ -353,35 +357,37 @@ class MainWindow(QtWidgets.QMainWindow):
         dataLayout.addWidget(self.dacVoltageLabel, 5, 1)
 
         mainLayout.addLayout(dataLayout)
-
+        
         return group
 
     def createControlGroup(self):
-        group = QGroupBox("Heater Mode Settings")
+        group = QGroupBox("Two Mass Model Settings")
         group.setFont(QFont("Verdana", 11, QFont.Bold))
         layout = QVBoxLayout(group)
 
         heaterButtonLayout = QHBoxLayout()
-        self.ssrHeaterButton = QPushButton("SOLID STATE RELAY HEATER")
-        self.virtualHeaterButton = QPushButton("BAM TWO MASS MODEL")
+        self.virtualHeaterButton = QPushButton("MODIFY SETTINGS")
 
-        for btn in [self.ssrHeaterButton, self.virtualHeaterButton]:
+        for btn in [self.virtualHeaterButton]:
             btn.setCheckable(True)
             btn.setFixedHeight(31)
-            btn.setFont(QFont("Satoshi", 8, QFont.Bold))  
-            self.ssrHeaterButton.toggled.connect(self.updateHeaterButtonState)
-            self.virtualHeaterButton.toggled.connect(self.updateHeaterButtonState)
+            btn.setFont(QFont("Satoshi", 8, QFont.Bold))
+            btn.toggled.connect(self.updateHeaterButtonState)
             heaterButtonLayout.addWidget(btn)
-            self.ssrHeaterButton.setChecked(False)
-            self.virtualHeaterButton.setChecked(False)
-
-        self.ssrSettingsGroup = self.createSSRSettingsGroup()
+            btn.setChecked(False)
+            
         self.virtualHeaterSettingsGroup = self.createVirtualHeaterSettingsGroup()
 
         self.updateHeaterButtonState()
+        # Create a new group box for real-time settings
+        self.settingsGroup = QGroupBox("Real-Time Settings")
+        self.settingsLayout = QGridLayout()
+
+        self.modelInitializedLabel = QLabel("Model Initialized: No")
+        self.boostHeaterLabel = QLabel("Boost Heater: Off")
+        self.timeElapsedLabel = QLabel("Time Elapsed: 0s")
 
         settingsLayout = QHBoxLayout()
-        settingsLayout.addWidget(self.ssrSettingsGroup)
         settingsLayout.addWidget(self.virtualHeaterSettingsGroup)
 
         buttonLayout = QHBoxLayout()
@@ -430,13 +436,6 @@ class MainWindow(QtWidgets.QMainWindow):
         activeStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #98C379; }"
         inactiveStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #E06C75; }"
         
-        if self.ssrHeaterButton.isChecked():
-            self.ssrSettingsGroup.setTitle("SSR Heater: Activated")
-            self.ssrSettingsGroup.setStyleSheet(activeStyle)
-        else:
-            self.ssrSettingsGroup.setTitle("SSR Heater: Off")
-            self.ssrSettingsGroup.setStyleSheet(inactiveStyle)
-        
         if self.virtualHeaterButton.isChecked():
             self.virtualHeaterSettingsGroup.setTitle("Two Mass Model: Activated")
             self.virtualHeaterSettingsGroup.setStyleSheet(activeStyle)
@@ -444,27 +443,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.virtualHeaterSettingsGroup.setTitle("Two Mass Model: Off")
             self.virtualHeaterSettingsGroup.setStyleSheet(inactiveStyle)
         
-        self.ssrSettingsGroup.style().unpolish(self.ssrSettingsGroup)
-        self.ssrSettingsGroup.style().polish(self.ssrSettingsGroup)
         self.virtualHeaterSettingsGroup.style().unpolish(self.virtualHeaterSettingsGroup)
         self.virtualHeaterSettingsGroup.style().polish(self.virtualHeaterSettingsGroup)
-            
-    def createSSRSettingsGroup(self):
-        group = QGroupBox("SSR Heater Settings")
-        group.setFont(QFont("Verdana", 10, QFont.Bold))
-        layout = QGridLayout()
-
-        self.targetTempInput = QLineEdit("23")
-        self.addSettingWithButtons(layout, "Target Temperature (°C):", self.targetTempInput, 0, font_size= 10.5)
-
-        self.toleranceInput = QLineEdit("0.2")
-        self.addSettingWithButtons(layout, "Temperature Tolerance (±°C):", self.toleranceInput, 1, font_size= 10.5)
-
-        self.dacVoltageInput = QLineEdit("2.5")
-        self.addSettingWithButtons(layout, "DAC Voltage Output (V):", self.dacVoltageInput, 2, font_size= 10.5)
-
-        group.setLayout(layout)
-        return group
 
     def createVirtualHeaterSettingsGroup(self):
         group = QGroupBox("Virtual Heater Settings")
@@ -472,13 +452,13 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QGridLayout()
 
         self.ambientTempInput = QLineEdit("7")
-        self.addSettingWithButtons(layout, "Ambient Temperature (°C):", self.ambientTempInput, 0, font_size=10.5)
+        self.addSettingWithButtons(layout, "██████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  Ambient Temperature:", self.ambientTempInput, 0, font_size=10.5)
         
         self.designHeatingPowerInput = QLineEdit("3750")
-        self.addSettingWithButtons(layout, "Design Heating Power (W):", self.designHeatingPowerInput, 1, font_size=10.5)
+        self.addSettingWithButtons(layout, "██████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  Design Heating Power:", self.designHeatingPowerInput, 1, font_size=10.5)
 
         self.initialReturnTempInput = QLineEdit("25")  
-        self.addSettingWithButtons(layout, "Initial Return Temperature (°C):", self.initialReturnTempInput, 2, font_size=10.5)
+        self.addSettingWithButtons(layout, "██████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  Initial SP Temperature:", self.initialReturnTempInput, 2, font_size=10.5)
 
         group.setLayout(layout)
         return group
@@ -528,21 +508,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def updateHeaterButtonState(self):
         activeStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #98C379; }"
         inactiveStyle = "QGroupBox { font: 8pt; font-weight: bold; color: #E06C75; }"
-        
-        if self.ssrHeaterButton.isChecked():
-            self.ssrSettingsGroup.setTitle("SSR HEATER ACTIVATED")
-            self.ssrSettingsGroup.setStyleSheet(activeStyle)
-            self.targetTempInput.setEnabled(True)
-            self.toleranceInput.setEnabled(True)
-            self.dacVoltageInput.setEnabled(True)
-        else:
-            self.ssrSettingsGroup.setTitle("SSR HEATER OFF")
-            self.ssrSettingsGroup.setStyleSheet(inactiveStyle)
-            self.targetTempInput.setEnabled(False)
-            self.toleranceInput.setEnabled(False)
-            self.dacVoltageInput.setEnabled(False)
-            self.dacVoltageInput.setText("0")
-
+    
         if self.virtualHeaterButton.isChecked():
             self.virtualHeaterSettingsGroup.setTitle("PARAMETERS READY TO MODIFY")
             self.virtualHeaterSettingsGroup.setStyleSheet(activeStyle)
@@ -556,8 +522,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.designHeatingPowerInput.setEnabled(False)
             self.initialReturnTempInput.setEnabled(False)
         
-        self.ssrSettingsGroup.style().unpolish(self.ssrSettingsGroup)
-        self.ssrSettingsGroup.style().polish(self.ssrSettingsGroup)
         self.virtualHeaterSettingsGroup.style().unpolish(self.virtualHeaterSettingsGroup)
         self.virtualHeaterSettingsGroup.style().polish(self.virtualHeaterSettingsGroup)
 
@@ -598,34 +562,6 @@ class MainWindow(QtWidgets.QMainWindow):
             lineEdit.setText(f"{newValue:.2f}")
         except ValueError:
             lineEdit.setText("0.0")
-
-    def toggleHeaterMode(self, isSSRHeaterActive):
-        self.ssrHeaterButton.setChecked(isSSRHeaterActive)
-        self.virtualHeaterButton.setChecked(not isSSRHeaterActive)
-        self.updateHeaterButtons(isSSRHeaterActive)
-
-        if isSSRHeaterActive:
-            self.ssrSettingsGroup.setTitle("ACTIVATED")
-            self.ssrSettingsGroup.setStyleSheet("QGroupBox { font: 10pt; font-weight: bold; color: #98C379; }")
-        else:
-            self.ssrSettingsGroup.setTitle("                                                                                                                                                                                                                            OFF")
-            self.ssrSettingsGroup.setStyleSheet("QGroupBox { font: 10pt; font-weight: bold; color: #E06C75; }")
-
-        if self.currentMassFlow > 0:
-            if not isSSRHeaterActive:
-                self.currentBuildingModel = CalcParameters(
-                    t_a=self.currentAmbientTemperature, 
-                    q_design=self.currentDesignHeatingPower,
-                    t_flow_design=self.currentFlowTemperatureDesign,
-                    mass_flow=self.currentMassFlow,
-                    boostHeat=True, 
-                    maxPowBooHea=self.boostHeatPower
-                ).createBuilding()
-                print("Virtual heater activated.")
-            else:
-                print("Virtual heater deactivated.")
-        else:
-            print("Mass flow data is not yet available. Delaying model initialization.")
 
     def addControlWithButtons(self, layout, lineEdit, row, columnSpan):
         upButton = QPushButton("+")
@@ -896,7 +832,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 print(f"Value required for command type: {commandType}")
                 return
-        elif commandType in ['activateVirtualHeater', 'activateSSRHeater']:
+        elif commandType in ['activateVirtualHeater']:
             command = commandType
         else:
             print(f"Unknown command type: {commandType}")
@@ -928,7 +864,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.stopButton.setEnabled(True)
         self.virtualHeaterButton.setEnabled(True)
-        self.ssrHeaterButton.setEnabled(True)
         self.dacVoltageInput.setEnabled(True)
         self.targetTempInput.setEnabled(True)
         self.toleranceInput.setEnabled(True)
@@ -950,7 +885,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.updateButton.setEnabled(True)
         self.stopButton.setEnabled(True)
         self.virtualHeaterButton.setEnabled(False)
-        self.ssrHeaterButton.setEnabled(False)
         self.dacVoltageInput.setEnabled(False)
         self.targetTempInput.setEnabled(False)
         self.toleranceInput.setEnabled(False)
@@ -1169,7 +1103,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 try:
                     time_data.append(date2num(datetime.strptime(time_item.text(), '%H:%M:%S')))
                     t_sup_data.append(float(t_sup_item.text()))
-                    t_ret_mea_data.append(float(model_return_temp_item.text()))
+                    t_ret_mea_data.append(float(t_ret_mea_item.text()))
                     q_flow_hp_data.append(float(q_flow_hp_item.text()))
                     q_flow_hb_data.append(float(q_flow_hb_item.text()))
                     q_flow_ba_data.append(float(q_flow_ba_item.text()))
@@ -1189,8 +1123,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax_heat_flow.plot(time_data, q_flow_hp_data, label='Heat Flow HP to Transfer System (q_hp)', linestyle='-', color='tab:green')
         self.ax_heat_flow.plot(time_data, q_flow_hb_data, label='Heat Flow to Building (q_hb)', linestyle='-', color='tab:orange')
         self.ax_heat_flow.plot(time_data, q_flow_ba_data, label='Heat Flow Building to Ambient (q_ba)', linestyle='-', color='tab:purple')
-        self.ax_heat_flow.plot(time_data, q_flow_int_data, label='Heat Flow Internal Gains to Building (q_int)', linestyle='-', color='tab:brown')
-        self.ax_heat_flow.plot(time_data, q_flow_bh_data, label='Heat Flow Booster Heater to Heating System (q_bh)', linestyle='-', color='tab:pink')
+        self.ax_heat_flow.plot(time_data, q_flow_int_data, label='Heat Flow Booster Heater to Heating System (q_bh)', linestyle='-', color='tab:brown')
+        self.ax_heat_flow.plot(time_data, q_flow_bh_data, label='Heat Flow Internal Gains to Building (q_int)', linestyle='-', color='tab:pink')
         self.ax_heat_flow.legend(loc='upper right')
         self.ax_heat_flow.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
