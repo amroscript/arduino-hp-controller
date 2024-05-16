@@ -4,11 +4,9 @@
     Email: amro.farag@bregroup.com / amrihabfaraj@gmail.com
 """
 
-import datetime
+from datetime import datetime
 import sys
 from matplotlib.dates import DateFormatter, date2num
-import numpy as np
-import matplotlib.pyplot as plt
 import serial
 import csv
 import time
@@ -91,13 +89,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.currentMassFlow = 0.0 
         self.currentDesignHeatingPower = 0  
         self.currentFlowTemperatureDesign = 0 
-        self.boostHeatPower = 6000  
+        self.boostHeatPower = 6000 
+
         self.t_sup_history = []  
         self.t_ret_history = []  
+
         self.lastDACVoltage = '0.00'
         self.lastSPtemp = '0.00'
         self.lastFlowRate = '0.00'
         self.lastreturnTemperature = '0.00'
+        
         self.hasBeenInitialized = False
 
         self.logoLabel = None
@@ -168,7 +169,7 @@ class MainWindow(QtWidgets.QMainWindow):
             bar_length = 100  # Adjust the length of the progress bar
             filled_length = int(round(bar_length * elapsed / float(total)))
             bar = '█' * filled_length + '-' * (bar_length - filled_length)
-            self.logToTerminal(f"|{bar}| {percent:.0f}%" "  Model Initialized.", messageType="init")
+            self.logToTerminal(f"|{bar}|" "  Model Initialized.", messageType="init")
         else:
             self.loadingTimer.stop()
             self.loadingStep = 0  # Reset for next use
@@ -231,13 +232,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         tableLayout.addLayout(headerLayout)
 
+        # Adjust the table to include all necessary columns
         self.tableWidget = QTableWidget()
-        self.tableWidget.setColumnCount(6)
-        self.tableWidget.setHorizontalHeaderLabels(["Time", "Temperature", "DAC Voltage", "Flow Rate", "SP Temperature", "Return Temperature"])
+        self.tableWidget.setColumnCount(12)  # Updated count according to the new columns
+        self.tableWidget.setHorizontalHeaderLabels([
+            "Time", "Supply Temperature", "DAC Voltage", "Flow Rate", "SP Temperature", 
+            "Return Temperature", "Heat Flow HB", "Heat Flow BA", "Heat Flow HP", 
+            "HF Internal Gains", "HF Booster Heater", "Building Temperature"
+        ])
 
         # Adjust column widths to ensure proper display
-        for i in range(6):
-            self.tableWidget.setColumnWidth(i, 200)
+        for i in range(12):
+            self.tableWidget.setColumnWidth(i, 150)  # Adjust width as needed
 
         self.tableWidget.setStyleSheet("""
             QTableWidget {
@@ -247,7 +253,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 gridline-color: #3B4048;
                 selection-background-color: #3E4451;
                 selection-color: #ABB2BF;
-                font-size: 11pt;
+                font-size: 9pt;
             }
             QTableWidget::item {
                 padding: 5px;
@@ -257,7 +263,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 color: #ABB2BF;
                 padding: 5px;
                 border: 1px solid #282C34;
-                font-size: 11pt;
+                font-size: 9pt;
                 font-family: 'Verdana';
             }
         """)
@@ -269,11 +275,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.graphTab = QWidget()
         self.graphLayout = QVBoxLayout()
         self.graphTab.setLayout(self.graphLayout)
-        self.setupGraph()
 
         self.figure = Figure(facecolor='#282C34')
         self.canvas = FigureCanvas(self.figure)
         self.canvas.setStyleSheet("QWidget {background-color: #282C34; color: #ABB2BF;}")
+
+        self.setupGraph()
+        self.updateGraph()
 
         self.graphLayout.addWidget(self.canvas)
         tabWidget.addTab(controlsTab, "Controls Monitor")
@@ -282,6 +290,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.setCentralWidget(tabWidget)
         applyOneDarkProTheme(QApplication.instance())
+        
 
     def createMeasurementGroup(self):
         group = QGroupBox("Instructions and Real-time Measurements")
@@ -353,18 +362,18 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QVBoxLayout(group)
 
         heaterButtonLayout = QHBoxLayout()
-        self.ssrHeaterButton = QPushButton("Solid State Relay Heater")
-        self.virtualHeaterButton = QPushButton("Two Mass Model")
+        self.ssrHeaterButton = QPushButton("SOLID STATE RELAY HEATER")
+        self.virtualHeaterButton = QPushButton("BAM TWO MASS MODEL")
 
         for btn in [self.ssrHeaterButton, self.virtualHeaterButton]:
             btn.setCheckable(True)
             btn.setFixedHeight(31)
+            btn.setFont(QFont("Satoshi", 8, QFont.Bold))  
             self.ssrHeaterButton.toggled.connect(self.updateHeaterButtonState)
             self.virtualHeaterButton.toggled.connect(self.updateHeaterButtonState)
             heaterButtonLayout.addWidget(btn)
-
-        self.ssrHeaterButton.setChecked(False)
-        self.virtualHeaterButton.setChecked(False)
+            self.ssrHeaterButton.setChecked(False)
+            self.virtualHeaterButton.setChecked(False)
 
         self.ssrSettingsGroup = self.createSSRSettingsGroup()
         self.virtualHeaterSettingsGroup = self.createVirtualHeaterSettingsGroup()
@@ -468,7 +477,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.designHeatingPowerInput = QLineEdit("3750")
         self.addSettingWithButtons(layout, "Design Heating Power (W):", self.designHeatingPowerInput, 1, font_size=10.5)
 
-        self.initialReturnTempInput = QLineEdit("30.0")  
+        self.initialReturnTempInput = QLineEdit("25")  
         self.addSettingWithButtons(layout, "Initial Return Temperature (°C):", self.initialReturnTempInput, 2, font_size=10.5)
 
         group.setLayout(layout)
@@ -541,7 +550,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.designHeatingPowerInput.setEnabled(True)
             self.initialReturnTempInput.setEnabled(True)
         else:
-            self.virtualHeaterSettingsGroup.setTitle("PARAMETERS READ ONLY")
+            self.virtualHeaterSettingsGroup.setTitle("PARAMETERS READ-ONLY")
             self.virtualHeaterSettingsGroup.setStyleSheet(inactiveStyle)
             self.ambientTempInput.setEnabled(False)
             self.designHeatingPowerInput.setEnabled(False)
@@ -705,7 +714,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def adjustDesignParameters(self, ambient_temp, default_q_design_e):
         heat_pump_sizes = {
             -10: (1.0, 3750, 55),
-            -7: (0.885, 4240, 52),
+            -7: (0.885, 5000, 52),
             2: (0.538, 7000, 42),
             7: (0.346, 10800, 36),
             12: (0.154, 24300, 30)
@@ -761,7 +770,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             self.returnTemperatureLabel.setText(f"{t_ret_mea:.2f}°C")
                         except ValueError as e:
                             print(f"Error converting return temperature: {e}")
-
+                    
                     dacVoltage = dataDict.get('DACVolt', self.lastDACVoltage)
                     self.dacVoltageLabel.setText(f"{dacVoltage} V")
                     self.lastDACVoltage = dacVoltage
@@ -784,7 +793,15 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.flowRateLabel.setText(f"{flowRateLPS:.3f} L/s")
 
                         if self.currentBuildingModel:
-                            self.addToSpreadsheet(time.strftime("%H:%M:%S", time.localtime()), dataDict['STemp'], dacVoltage, model_return_temp, flowRate, dataDict.get('RTemp', 'N/A'))
+                            q_hb = self.currentBuildingModel.q_dot_hb
+                            q_ba = self.currentBuildingModel.q_dot_ba
+                            q_hp = self.currentBuildingModel.q_dot_hp
+                            q_int = self.currentBuildingModel.q_dot_int
+                            q_bh = self.currentBuildingModel.q_dot_bh
+                            t_b = self.currentBuildingModel.MassB.T
+
+                        if self.currentBuildingModel:
+                            self.addToSpreadsheet(time.strftime("%H:%M:%S", time.localtime()), dataDict['STemp'], dacVoltage, model_return_temp, flowRate, dataDict.get('RTemp', 'N/A'), q_hb, q_ba, q_hp, q_int, q_bh, t_b)
                             
                     # Call updateGraph to refresh graphs with new data
                     self.updateGraph()
@@ -855,7 +872,7 @@ class MainWindow(QtWidgets.QMainWindow):
             new_t_ret = self.currentBuildingModel.t_ret
 
             if new_t_ret < 0:
-                self.logToTerminal(f"Warning: Calculated return temperature is negative ({new_t_ret:.2f}°C). Resetting to last valid temperature.", messageType="warning")
+                self.logToTerminal(f"Warning: Calculated return temperature is negative ({new_t_ret:.2f}°C). Resetting to last valid temperature.", messageType="error")
                 new_t_ret = last_t_ret
 
             self.t_ret_history.append(new_t_ret)
@@ -962,25 +979,58 @@ class MainWindow(QtWidgets.QMainWindow):
         formattedMessage = f"<p style='{style}'>{message}</p>"
         self.terminal.appendHtml(formattedMessage)
 
-    def addToSpreadsheet(self, timeData, temperature, dacVoltage, model_return_temp, flowRate, returnTemperature):
+    def addToSpreadsheet(self, timeData, temperature, dacVoltage, model_return_temp, flowRate, returnTemperature, q_hb, q_ba, q_hp, q_int, q_bh, t_b):
         """
         Adds data to the spreadsheet widget and updates the graph data.
         """
         try:
+            # Convert values to float or None if 'N/A'
             temperature = float(temperature) if temperature != 'N/A' else None
             dacVoltage = float(dacVoltage) if dacVoltage != 'N/A' else None
             model_return_temp = float(model_return_temp) if model_return_temp != 'N/A' else None
             flowRate = float(flowRate) if flowRate != 'N/A' else None
             returnTemperature = float(returnTemperature) if returnTemperature != 'N/A' else None
+            q_hb = float(q_hb) if q_hb != 'N/A' else None
+            q_ba = float(q_ba) if q_ba != 'N/A' else None
+            q_hp = float(q_hp) if q_hp != 'N/A' else None
+            q_int = float(q_int) if q_int != 'N/A' else None
+            q_bh = float(q_bh) if q_bh != 'N/A' else None
+            t_b = float(t_b) if t_b != 'N/A' else None
 
             if any(value is None or value == 0 for value in [temperature, dacVoltage, model_return_temp, flowRate, returnTemperature] if value is not None):
                 self.logToTerminal("Skipping addition to spreadsheet due to zero or invalid value.", messageType="warning")
                 return
 
+            # Define a list of important variables that should not be zero or invalid
+            important_values = [
+                ('temperature', temperature), 
+                ('model_return_temp', model_return_temp), 
+                ('flowRate', flowRate), 
+                ('returnTemperature', returnTemperature), 
+                ('q_hb', q_hb), 
+                ('q_ba', q_ba), 
+                ('t_b', t_b)
+            ]
+
+            # Check for invalid values in important variables
+            invalid_values = [(name, value) for name, value in important_values if value is None or value == 0]
+
+            if invalid_values:
+                self.logToTerminal(f"Skipping addition to spreadsheet due to zero or invalid value: {invalid_values}", messageType="warning")
+                return
+
             rowPosition = self.tableWidget.rowCount()
             self.tableWidget.insertRow(rowPosition)
 
-            data = [timeData] + [f"{value:.2f}" if value is not None else "N/A" for value in [temperature, dacVoltage, flowRate, model_return_temp, returnTemperature]]
+            # Format data for display in the spreadsheet
+            data = [timeData] + [f"{value:.3f}" if value is not None else "N/A" for value in [
+                temperature, dacVoltage, flowRate, model_return_temp, returnTemperature, q_hb, q_ba, q_hp, q_int, q_bh, t_b
+            ]]
+            
+            # Debug print statement to check data being added
+            print("Adding to spreadsheet:", data)
+            
+            # Ensure correct data alignment
             for index, item in enumerate(data):
                 self.tableWidget.setItem(rowPosition, index, QTableWidgetItem(item))
 
@@ -1026,12 +1076,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         Sets up the graph layout and axes.
         """
-        self.figure = Figure(facecolor='#282C34')
+        # Increase the figure size (width, height)
+        self.figure = Figure(figsize=(10, 12), facecolor='#282C34')
         self.canvas = FigureCanvas(self.figure)
         self.canvas.setStyleSheet("QWidget {background-color: #282C34; color: #ABB2BF;}")
 
-        # Create a 3-row subplot layout for different graphs with larger height
-        gs = self.figure.add_gridspec(3, 1, height_ratios=[1, 1, 1], hspace=1.2)
+        # Create a 3-row subplot layout for different graphs with larger height and increased spacing
+        gs = self.figure.add_gridspec(3, 1, height_ratios=[1, 1, 1], hspace=0.5, wspace=0.4)
 
         self.ax_temp = self.figure.add_subplot(gs[0, 0])  # Temperature graph
         self.ax_heat_flow = self.figure.add_subplot(gs[1, 0])  # Heat flow graph
@@ -1095,56 +1146,60 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax_building_temp.grid(True, color='#4B4B4B')
 
         # Initialize data lists
-        time_data, t_sup_data, t_ret_data, t_b_data = [], [], [], []
-        q_flow_hp, q_flow_hb, q_flow_ba, q_flow_int, q_flow_bh = [], [], [], [], []
+        time_data, t_sup_data, t_ret_mea_data, t_b_data = [], [], [], []
+        q_flow_hp_data, q_flow_hb_data, q_flow_ba_data, q_flow_int_data, q_flow_bh_data = [], [], [], [], []
 
         # Process each row in the table widget
         for row in range(self.tableWidget.rowCount()):
             time_item = self.tableWidget.item(row, 0)
             t_sup_item = self.tableWidget.item(row, 1)
+            dacVoltage_item = self.tableWidget.item(row, 2)
+            flow_rate_item = self.tableWidget.item(row, 3)
+            model_return_temp_item = self.tableWidget.item(row, 4)
             t_ret_mea_item = self.tableWidget.item(row, 5)
-            q_hp_item = self.tableWidget.item(row, 2)
-            q_hb_item = self.tableWidget.item(row, 3)
-            q_ba_item = self.tableWidget.item(row, 4)
-            t_b_item = self.tableWidget.item(row, 6)
+            q_flow_hb_item = self.tableWidget.item(row, 6)
+            q_flow_ba_item = self.tableWidget.item(row, 7)
+            q_flow_hp_item = self.tableWidget.item(row, 8)
+            q_flow_int_item = self.tableWidget.item(row, 9)
+            q_flow_bh_item = self.tableWidget.item(row, 10)
+            t_b_item = self.tableWidget.item(row, 11)
 
             # Ensure items are not None before accessing text
-            if all(item is not None for item in [time_item, t_sup_item, t_ret_mea_item, q_hp_item, q_hb_item, q_ba_item, t_b_item]):
+            if all(item is not None for item in [time_item, t_sup_item, flow_rate_item, model_return_temp_item, t_ret_mea_item, q_flow_hb_item, q_flow_ba_item, q_flow_hp_item, q_flow_int_item, q_flow_bh_item, t_b_item]):
                 try:
                     time_data.append(date2num(datetime.strptime(time_item.text(), '%H:%M:%S')))
                     t_sup_data.append(float(t_sup_item.text()))
-                    t_ret_data.append(float(t_ret_mea_item.text()))
+                    t_ret_mea_data.append(float(model_return_temp_item.text()))
+                    q_flow_hp_data.append(float(q_flow_hp_item.text()))
+                    q_flow_hb_data.append(float(q_flow_hb_item.text()))
+                    q_flow_ba_data.append(float(q_flow_ba_item.text()))
+                    q_flow_int_data.append(float(q_flow_int_item.text()))
+                    q_flow_bh_data.append(float(q_flow_bh_item.text()))
                     t_b_data.append(float(t_b_item.text()))
-                    q_flow_hp.append(float(q_hp_item.text()))
-                    q_flow_hb.append(float(q_hb_item.text()))
-                    q_flow_ba.append(float(q_ba_item.text()))
-                    q_flow_int.append(0)  # Example data, adjust as needed
-                    q_flow_bh.append(0)  # Example data, adjust as needed
                 except ValueError as e:
                     print(f"Error converting table data: {e}")
 
         # Plot temperature data
-        self.ax_temp.plot(time_data, t_sup_data, label='Supply Temp (t_sup)', linestyle='-', marker='o', color='tab:blue')
-        self.ax_temp.plot(time_data, t_ret_data, label='Return Temp Measured (t_ret_mea)', linestyle='--', marker='x', color='tab:red')
+        self.ax_temp.plot(time_data, t_sup_data, label='Supply Temperature (t_sup)', linestyle='-', color='tab:blue')
+        self.ax_temp.plot(time_data, t_ret_mea_data, label='Return Temperature (t_ret_mea)', linestyle='--', color='tab:red')
         self.ax_temp.legend(loc='upper right')
         self.ax_temp.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
         # Plot heat flow data
-        self.ax_heat_flow.plot(time_data, q_flow_hp, label='Heat Flow HP -> Heating System', linestyle='-', color='tab:green')
-        self.ax_heat_flow.plot(time_data, q_flow_hb, label='Heat Flow Transfer -> Building', linestyle='--', color='tab:orange')
-        self.ax_heat_flow.plot(time_data, q_flow_ba, label='Heat Flow Building -> Ambient', linestyle=':', color='tab:purple')
-        self.ax_heat_flow.plot(time_data, q_flow_int, label='Heat Flow Internal Gains -> Building', linestyle='-.', color='tab:brown')
-        self.ax_heat_flow.plot(time_data, q_flow_bh, label='Heat Flow Booster Heater -> Heating System', linestyle='-', color='tab:cyan')
+        self.ax_heat_flow.plot(time_data, q_flow_hp_data, label='Heat Flow HP to Transfer System (q_hp)', linestyle='-', color='tab:green')
+        self.ax_heat_flow.plot(time_data, q_flow_hb_data, label='Heat Flow to Building (q_hb)', linestyle='-', color='tab:orange')
+        self.ax_heat_flow.plot(time_data, q_flow_ba_data, label='Heat Flow Building to Ambient (q_ba)', linestyle='-', color='tab:purple')
+        self.ax_heat_flow.plot(time_data, q_flow_int_data, label='Heat Flow Internal Gains to Building (q_int)', linestyle='-', color='tab:brown')
+        self.ax_heat_flow.plot(time_data, q_flow_bh_data, label='Heat Flow Booster Heater to Heating System (q_bh)', linestyle='-', color='tab:pink')
         self.ax_heat_flow.legend(loc='upper right')
         self.ax_heat_flow.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
         # Plot building temperature data
-        self.ax_building_temp.plot(time_data, t_b_data, label='Building Temperature', linestyle='-', color='tab:gray')
+        self.ax_building_temp.plot(time_data, t_b_data, label='Building Temperature (t_b)', linestyle='-', color='tab:gray')
         self.ax_building_temp.legend(loc='upper right')
         self.ax_building_temp.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
         # Update canvas
-        self.figure.tight_layout(pad=5.0)  
         self.canvas.draw()
         self.canvas.flush_events()
 
