@@ -19,9 +19,16 @@ float desiredVoltage = 0.0; // Desired voltage to be set on the DAC
 float dacVoltage = 0.0;
 float correctionFactor = 0.891;
 
+const int avgPeriod = 4000; // Averaging period in milliseconds
+const int avgSamples = avgPeriod / 1000; // Number of samples for averaging (1 sample per second)
+float tempSamples[avgSamples]; // Array to hold temperature samples
+float returnTempSamples[avgSamples]; // Array to hold return temperature samples
+int sampleIndex = 0; // Current index in the sample array
+unsigned long lastSampleTime = 0; // Last time a sample was taken
+
 void setup() {
   Serial.begin(115200); // Begin Serial communication at 115200 baud rate
-  while (!Serial) { ; } // Wait for the serial port to connect. 
+  while (!Serial) { ; } // Wait for the serial port to connect
 
   if (!rtc.begin()) { // Check if the RTC is connected and working
     Serial.println("Couldn't find RTC");
@@ -40,6 +47,14 @@ void setup() {
   }
 
   pinMode(heatingPin, OUTPUT); // Set the heating control pin as an output
+
+  // Initialize the temperature sample arrays with the initial sensor readings
+  float initialTemp = readTemperature(A2);
+  float initialReturnTemp = readReturnTemperature(A1);
+  for (int i = 0; i < avgSamples; i++) {
+    tempSamples[i] = initialTemp;
+    returnTempSamples[i] = initialReturnTemp;
+  }
 }
 
 void loop() {
@@ -48,34 +63,50 @@ void loop() {
     processSerialCommand(command); // Process the received serial command
   }
 
-  float temperature = readTemperature(A2); 
-  float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor 
-  float returnTemperature = readreturnTemperature(A1);
+  if (millis() - lastSampleTime >= 1000) { // Take a sample every second
+    lastSampleTime = millis();
+    tempSamples[sampleIndex] = readTemperature(A2);
+    returnTempSamples[sampleIndex] = readReturnTemperature(A1);
+    sampleIndex = (sampleIndex + 1) % avgSamples;
+  }
 
+  float temperature = calculateRunningAverage(tempSamples, avgSamples);
+  float returnTemperature = calculateRunningAverage(returnTempSamples, avgSamples);
+
+  float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor 
   flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage
-  
+
   setDACVoltage(desiredVoltage); // Update the DAC output voltage
   controlHeating(temperature, targetTemperature, tolerance); // Control heating element based on temperature
 
   sendSerialData(temperature, desiredVoltage, sensorVoltage, flowRate, returnTemperature); // Send data over serial
 
-  delay(750); // Delay for a second before repeating the loop
+  delay(1000); // Delay for a second before repeating the loop
 }
 
-
+// Function to read supply temperature
 float readTemperature(int pin) {
   int supSensorValue = analogRead(pin);
   float voltage = supSensorValue * (5.0 / 1023.0); // Convert the sensor reading to a voltage (0V to 5V)
-  float temperature = (voltage * 70.0) / 5.0; // The voltage range 0V to 5V corresponds to temperature range 0°C to 70°C
+  float temperature = (1.01552 * ((voltage * 70.0) / 5.0)) + 0.20325; // Corrected conversion formula
   return temperature;
 }
 
- // Function to read temperature from (more stable) temperature sensor
-float readreturnTemperature(int pin) { 
+// Function to read return temperature
+float readReturnTemperature(int pin) { 
   int retsensorValue = analogRead(pin);
   float voltage = retsensorValue * (5.0 / 1023.0); // Convert the sensor reading to a voltage (0V to 5V)
-  float returnTemperature = (voltage * 70.0) / 5.0; // The voltage range 0V to 5V corresponds to temperature range 0°C to 70°C
+  float returnTemperature = (1.01652 * ((voltage * 70.0) / 5.0)) + 0.32448; // Corrected conversion formula
   return returnTemperature;
+}
+
+// Function to calculate running average
+float calculateRunningAverage(float* samples, int sampleCount) {
+  float sum = 0.0;
+  for (int i = 0; i < sampleCount; i++) {
+    sum += samples[i];
+  }
+  return sum / sampleCount;
 }
 
 // Function to read analog voltage
@@ -84,7 +115,6 @@ float readAnalogVoltage(int pin) {
   float voltage = sensorValue * (5.0 / 1023.0); // Convert to voltage (assuming 5V reference)
   return voltage;
 }
-
 
 // Function to calculate flow rate based on sensor voltage (Example function, implement according to your sensor)
 float calculateFlowRate(float sensorVoltage) {
@@ -98,7 +128,7 @@ void setDACVoltage(float voltage) {
   float correctedVoltage = voltage * correctionFactor;
 
   // Ensure correctedVoltage is within the DAC's allowable range
-  correctedVoltage = constrain(correctedVoltage, 0.0, 10.0); // Assuming the DAC's range is 0-5V
+  correctedVoltage = constrain(correctedVoltage, 0.0, 10.0); // Assuming the DAC's range is 0-10V
 
   uint16_t dacValue = static_cast<uint16_t>((correctedVoltage / 10.0) * 4095);
   dac.setDACOutVoltage(dacValue, 0); // Set voltage on DAC channel 0
@@ -129,7 +159,6 @@ void sendSerialData(float temperature, float dacVoltage, float sensorVoltage, fl
   Serial.print(", RTemp:");
   Serial.println(returnTemperature);
 }
-
 
 // Function to process commands received from the serial port
 void processSerialCommand(String command) {
