@@ -23,6 +23,7 @@ const int avgPeriod = 4000; // Averaging period in milliseconds
 const int avgSamples = avgPeriod / 1000; // Number of samples for averaging (1 sample per second)
 float tempSamples[avgSamples]; // Array to hold temperature samples
 float returnTempSamples[avgSamples]; // Array to hold return temperature samples
+float flowRateSamples[avgSamples]; // Array to hold flow rate samples
 int sampleIndex = 0; // Current index in the sample array
 unsigned long lastSampleTime = 0; // Last time a sample was taken
 
@@ -48,12 +49,15 @@ void setup() {
 
   pinMode(heatingPin, OUTPUT); // Set the heating control pin as an output
 
-  // Initialize the temperature sample arrays with the initial sensor readings
+  // Initialize the temperature and flow rate sample arrays with the initial sensor readings
   float initialTemp = readTemperature(A2);
   float initialReturnTemp = readReturnTemperature(A1);
+  float initialFlowRate = readFlowRate(A0); // Assuming A0 is used for flow rate sensor
+
   for (int i = 0; i < avgSamples; i++) {
     tempSamples[i] = initialTemp;
     returnTempSamples[i] = initialReturnTemp;
+    flowRateSamples[i] = initialFlowRate;
   }
 }
 
@@ -67,19 +71,20 @@ void loop() {
     lastSampleTime = millis();
     tempSamples[sampleIndex] = readTemperature(A2);
     returnTempSamples[sampleIndex] = readReturnTemperature(A1);
+    flowRateSamples[sampleIndex] = readFlowRate(A0);
     sampleIndex = (sampleIndex + 1) % avgSamples;
   }
 
   float temperature = calculateRunningAverage(tempSamples, avgSamples);
   float returnTemperature = calculateRunningAverage(returnTempSamples, avgSamples);
+  float averagedFlowRate = calculateRunningAverage(flowRateSamples, avgSamples);
 
-  float sensorVoltage = readAnalogVoltage(A0); // Read the analog voltage from a sensor 
-  flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage
+  flowRate = averagedFlowRate;
 
   setDACVoltage(desiredVoltage); // Update the DAC output voltage
   controlHeating(temperature, targetTemperature, tolerance); // Control heating element based on temperature
 
-  sendSerialData(temperature, desiredVoltage, sensorVoltage, flowRate, returnTemperature); // Send data over serial
+  sendSerialData(temperature, desiredVoltage, averagedFlowRate, flowRate, returnTemperature); // Send data over serial
 
   delay(1000); // Delay for a second before repeating the loop
 }
@@ -100,6 +105,14 @@ float readReturnTemperature(int pin) {
   return returnTemperature;
 }
 
+// Function to read flow rate
+float readFlowRate(int pin) {
+  int sensorValue = analogRead(pin);
+  float voltage = sensorValue * (5.0 / 1023.0); // Convert the sensor reading to a voltage (0V to 5V)
+  float flowRate = voltage * (1.0 / 5.0); // Example calculation, adjust according to your sensor
+  return flowRate;
+}
+
 // Function to calculate running average
 float calculateRunningAverage(float* samples, int sampleCount) {
   float sum = 0.0;
@@ -114,12 +127,6 @@ float readAnalogVoltage(int pin) {
   int sensorValue = analogRead(pin);
   float voltage = sensorValue * (5.0 / 1023.0); // Convert to voltage (assuming 5V reference)
   return voltage;
-}
-
-// Function to calculate flow rate based on sensor voltage (Example function, implement according to your sensor)
-float calculateFlowRate(float sensorVoltage) {
-  flowRate = sensorVoltage * (1.0 / 5.0);
-  return flowRate;
 }
 
 // Function to set DAC voltage
@@ -147,13 +154,13 @@ void controlHeating(float currentTemperature, float targetTemp, float tempTolera
 }
 
 // Function to send collected data over serial
-void sendSerialData(float temperature, float dacVoltage, float sensorVoltage, float flowRate, float returnTemperature) {
+void sendSerialData(float temperature, float dacVoltage, float averagedFlowRate, float flowRate, float returnTemperature) {
   Serial.print("STemp:");
   Serial.print(temperature);
   Serial.print(", DACVolt:");
   Serial.print(dacVoltage);
-  Serial.print(", SensorVolt:");
-  Serial.print(sensorVoltage);
+  Serial.print(", AveragedFlowRate:");
+  Serial.print(averagedFlowRate, 3);
   Serial.print(", FlowRate:");
   Serial.print(flowRate, 3);
   Serial.print(", RTemp:");
