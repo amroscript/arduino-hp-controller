@@ -4,20 +4,23 @@
     Email: amro.farag@bregroup.com / amrihabfaraj@gmail.com
 """
 
-from datetime import datetime
 import sys
-from matplotlib.dates import DateFormatter, date2num
-import serial
 import csv
 import time
+import serial
+import numpy as np
+from collections import deque
+from datetime import datetime
+from filelock import FileLock
+from matplotlib.dates import DateFormatter, date2num
 from bamLoadBasedTesting.twoMassModel import CalcParameters
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QPushButton, \
     QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QFrame, QPlainTextEdit, \
-    QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog
-from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap
+    QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog, QProgressBar
+from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap, QIcon
 from PyQt5.QtCore import QTimer, Qt, QSize, QByteArray
 
 # Constants for Arduino connection
@@ -105,7 +108,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.boost_heater_on = False
         self.initialization_time = None
 
-
         self.logoLabel = None
         self.timer = None
         self.time_data = []
@@ -132,14 +134,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.targetTempInput = QtWidgets.QLineEdit()
         self.toleranceInput = QtWidgets.QLineEdit()
 
+        self.headers_written = False
+        self.data_storage = np.empty((0, 12), dtype=object)  # Using NumPy for efficient storage
+        self.csv_buffer = deque()  # Buffer for batch writing to CSV
+        self.batch_size = 100  # Define batch size for writing to CSV
+        
+        self.csv_file_path = None  
+        self.csv_lock_path = None 
+        self.csv_writer = None  # CSV writer object
+    
         self.setWindowTitle("ArduinoUI")
+        self.setWindowIcon(QIcon('C:/Users/hvaclab/Desktop/GUI Testing/icon.ico'))
         self.setupUI()
         applyOneDarkProTheme(QApplication.instance())
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.updateDisplay)
         self.timer.start(100)
-
 
         self.loadingTimer = QTimer(self)
         self.loadingTimer.timeout.connect(self.updateLoadingBar)
@@ -163,23 +174,34 @@ class MainWindow(QtWidgets.QMainWindow):
             self.logToTerminal("> Serial connection established. System initialized.")
         except serial.SerialException as e:
             self.logToTerminal(f"> Error connecting to Arduino: {e}", messageType="error")
+            self.retrySerialConnection()
+
+    def retrySerialConnection(self, retries=5, delay=2):
+        for attempt in range(retries):
+            try:
+                self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+                self.logToTerminal("> Serial connection re-established.")
+                return
+            except serial.SerialException as e:
+                self.logToTerminal(f"> Retry {attempt + 1} failed: {e}", messageType="error")
+                time.sleep(delay)
+        self.logToTerminal("> Failed to establish serial connection after multiple attempts.", messageType="error")
 
     def updateLoadingBar(self):
         if self.loadingStep < 100:
-            self.loadingStep += 100
-            elapsed = self.loadingStep
-            total = 100
-            percent = (elapsed / total) * 100
-            bar_length = 100  # Adjust the length of the progress bar
-            filled_length = int(round(bar_length * elapsed / float(total)))
-            bar = '█' * filled_length + '-' * (bar_length - filled_length)
-            self.logToTerminal(f"|{bar}|" "  Model Initialized.", messageType="init")
+            self.loadingStep += 1
+            self.progressBar.setValue(self.loadingStep)
+            self.progressBar.setVisible(True)
         else:
             self.loadingTimer.stop()
+            self.progressBar.setVisible(False)
             self.loadingStep = 0  # Reset for next use
 
     def startLoadingBar(self):
-        self.loadingTimer.start() 
+        self.loadingStep = 0
+        self.progressBar.setValue(self.loadingStep)
+        self.progressBar.setVisible(True)
+        self.loadingTimer.start(100)  # Adjust the interval as needed
 
     def setupUI(self):
         self.setFont(QFont("Verdana", 12))
@@ -197,9 +219,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.logoLabel.setPixmap(scaledLogoPixmap)
         self.logoLabel.setAlignment(Qt.AlignCenter)
 
+        # Create QProgressBar
+        self.progressBar = QProgressBar(self)
+        self.progressBar.setGeometry(200, 80, 250, 20)
+        self.progressBar.setMaximum(100)
+        self.progressBar.setVisible(False)  # Hide by default
+
         controlsTab = QWidget()
         controlsLayout = QVBoxLayout()
         controlsLayout.addWidget(self.logoLabel)
+        controlsLayout.addWidget(self.progressBar) 
         self.measurementGroup = self.createMeasurementGroup()
         self.controlGroup = self.createControlGroup()
         self.terminal = self.createTerminal()
@@ -240,14 +269,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tableWidget = QTableWidget()
         self.tableWidget.setColumnCount(12)  # Updated count according to the new columns
         self.tableWidget.setHorizontalHeaderLabels([
-            "Time", "Supply Temperature", "DAC Voltage", "Flow Rate", "SP Temperature", 
+            "Time", "Supply Temperature", "DAC Voltage", "SP Temperature", "Flow Rate", 
             "Return Temperature", "Heat Flow HB", "Heat Flow BA", "Heat Flow HP", 
             "HF Internal Gains", "HF Booster Heater", "Building Temperature"
         ])
 
         # Adjust column widths to ensure proper display
         for i in range(12):
-            self.tableWidget.setColumnWidth(i, 150)  # Adjust width as needed
+            self.tableWidget.setColumnWidth(i, 151)  # Adjust width as needed
 
         self.tableWidget.setStyleSheet("""
             QTableWidget {
@@ -271,6 +300,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 font-family: 'Verdana';
             }
         """)
+        
+        self.progressBar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 5px;
+                background-color: #3B4048;
+                color: #ABB2BF;
+                text-align: center;
+            }
+
+            QProgressBar::chunk {
+                background-color: #98C379;
+                width: 20px;
+                border-radius: 5px;
+            }
+            """)
+
 
         tableLayout.addWidget(self.tableWidget)
         spreadsheetLayout.addWidget(tableFrame)
@@ -379,13 +425,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.virtualHeaterSettingsGroup = self.createVirtualHeaterSettingsGroup()
 
         self.updateHeaterButtonState()
-        # Create a new group box for real-time settings
-        self.settingsGroup = QGroupBox("Real-Time Settings")
-        self.settingsLayout = QGridLayout()
-
-        self.modelInitializedLabel = QLabel("Model Initialized: No")
-        self.boostHeaterLabel = QLabel("Boost Heater: Off")
-        self.timeElapsedLabel = QLabel("Time Elapsed: 0s")
 
         settingsLayout = QHBoxLayout()
         settingsLayout.addWidget(self.virtualHeaterSettingsGroup)
@@ -535,7 +574,7 @@ class MainWindow(QtWidgets.QMainWindow):
         upButton.setFont(QFont("Verdana", int(font_size)))
         downButton.setFont(QFont("Verdana", int(font_size)))
 
-        buttonSize = QSize(30, 30)
+        buttonSize = QSize(60, 30)
         upButton.setFixedSize(buttonSize)
         downButton.setFixedSize(buttonSize)
 
@@ -605,7 +644,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             ambient_temp = float(self.ambientTempInput.text())
-            default_q_design_e = 3750  # Default design heat power at -10°C
+            default_q_design_e = 5500  # Default design heat power at -10°C
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from l/h to kg/s, ensure non-zero
 
@@ -628,6 +667,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.t_sup_history = []
             self.t_ret_history = [float(self.initialReturnTempInput.text())]  # Start with the initial return temperature
 
+            # Ask user to save the file
+            self.saveCSVFileDialog()
+
             self.startLoadingBar()
         except Exception as e:
             self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
@@ -649,7 +691,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def adjustDesignParameters(self, ambient_temp, default_q_design_e):
         heat_pump_sizes = {
-            -10: (1.0, 3750, 55),
+            -10: (1.0, 5500, 55),
             -7: (0.885, 5000, 52),
             2: (0.538, 7000, 42),
             7: (0.346, 10800, 36),
@@ -676,9 +718,6 @@ class MainWindow(QtWidgets.QMainWindow):
         return new_q_design_e, t_flow_design, boostHeat
 
     def updateDisplay(self):
-        """
-        Update the display with new serial data and refresh the graphs.
-        """
         try:
             if self.arduinoSerial and self.arduinoSerial.in_waiting:
                 serialData = self.arduinoSerial.readline().decode('utf-8').strip()
@@ -706,7 +745,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             self.returnTemperatureLabel.setText(f"{t_ret_mea:.2f}°C")
                         except ValueError as e:
                             print(f"Error converting return temperature: {e}")
-                    
+
                     dacVoltage = dataDict.get('DACVolt', self.lastDACVoltage)
                     self.dacVoltageLabel.setText(f"{dacVoltage} V")
                     self.lastDACVoltage = dacVoltage
@@ -737,11 +776,10 @@ class MainWindow(QtWidgets.QMainWindow):
                             t_b = self.currentBuildingModel.MassB.T
 
                         if self.currentBuildingModel:
-                            self.addToSpreadsheet(time.strftime("%H:%M:%S", time.localtime()), dataDict['STemp'], dacVoltage, model_return_temp, flowRate, dataDict.get('RTemp', 'N/A'), q_hb, q_ba, q_hp, q_int, q_bh, t_b)
-                            
-                    # Call updateGraph to refresh graphs with new data
+                            self.addToSpreadsheet(datetime.now().strftime('%H:%M:%S'), dataDict['STemp'], dacVoltage, model_return_temp, flowRate, dataDict.get('RTemp', 'N/A'), q_hb, q_ba, q_hp, q_int, q_bh, t_b)
+
                     self.updateGraph()
-                            
+
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
 
@@ -757,7 +795,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             ambient_temp = float(self.ambientTempInput.text())
-            default_q_design_e = 3750  # Default design heat power at -10°C
+            default_q_design_e = 5500  # Default design heat power at -10°C
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from L/h to kg/s to ensure non-zero mass flow
 
@@ -870,7 +908,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.initializeBuildingModel()
 
-
     def stopOperations(self):
         dacVoltage = 0
         self.sendSerialCommand(f"setVoltage {dacVoltage}")
@@ -913,12 +950,59 @@ class MainWindow(QtWidgets.QMainWindow):
         formattedMessage = f"<p style='{style}'>{message}</p>"
         self.terminal.appendHtml(formattedMessage)
 
-    def addToSpreadsheet(self, timeData, temperature, dacVoltage, model_return_temp, flowRate, returnTemperature, q_hb, q_ba, q_hp, q_int, q_bh, t_b):
-        """
-        Adds data to the spreadsheet widget and updates the graph data.
-        """
+    def saveCSVFileDialog(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)", options=options)
+        if filePath:
+            self.setCSVFilePath(filePath)
+            self.logToTerminal(f"> CSV file set to save at: {filePath}")
+            self.initCSVFile()  # Initialize CSV file with headers
+        else:
+            self.logToTerminal("> CSV file save canceled.", messageType="warning")
+
+    def saveCSVFileDialog(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)", options=options)
+        if filePath:
+            self.setCSVFilePath(filePath)
+            self.logToTerminal(f"> CSV file set to save at: {filePath}")
+            self.initCSVFile()  # Initialize CSV file with headers
+        else:
+            self.logToTerminal("> CSV file save canceled.", messageType="warning")
+
+    def setCSVFilePath(self, file_path):
+        self.csv_file_path = file_path
+        self.csv_lock_path = file_path + ".lock"
+        self.headers_written = False
+
+    def initCSVFile(self):
+        if not self.csv_file_path:
+            self.logToTerminal("CSV file path not set.", messageType="error")
+            return
+
+        # Lock the file and open it in append mode
+        self.csv_lock = FileLock(self.csv_lock_path)
+        self.csv_lock.acquire()
+        self.csv_file = open(self.csv_file_path, 'a', newline='', encoding='utf-8')
+        self.csv_writer = csv.writer(self.csv_file)
+
+        # Write headers if not already written
+        if not self.headers_written:
+            self.csv_writer.writerow(['Project Number', self.projectNumberInput.text()])
+            self.csv_writer.writerow(['Client Name', self.clientNameInput.text()])
+            self.csv_writer.writerow(['Date', self.dateInput.text()])
+            self.csv_writer.writerow([])  # Empty row to separate the metadata from the column headers
+            self.csv_writer.writerow([
+                'Time', 'Supply Temperature', 'DAC Voltage', 'SP Temperature', 'Flow Rate',
+                'Return Temperature', 'Heat Flow HB', 'Heat Flow BA', 'Heat Flow HP',
+                'HF Internal Gains', 'HF Booster Heater', 'Building Temperature'
+            ])
+            self.headers_written = True
+
+    def addToSpreadsheet(self, timestamp, temperature, dacVoltage, model_return_temp, flowRate, returnTemperature, q_hb, q_ba, q_hp, q_int, q_bh, t_b):
         try:
-            # Convert values to float or None if 'N/A'
             temperature = float(temperature) if temperature != 'N/A' else None
             dacVoltage = float(dacVoltage) if dacVoltage != 'N/A' else None
             model_return_temp = float(model_return_temp) if model_return_temp != 'N/A' else None
@@ -935,71 +1019,84 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.logToTerminal("Skipping addition to spreadsheet due to zero or invalid value.", messageType="warning")
                 return
 
-            # Define a list of important variables that should not be zero or invalid
             important_values = [
-                ('temperature', temperature), 
-                ('model_return_temp', model_return_temp), 
-                ('flowRate', flowRate), 
-                ('returnTemperature', returnTemperature), 
-                ('q_hb', q_hb), 
-                ('q_ba', q_ba), 
+                ('temperature', temperature),
+                ('model_return_temp', model_return_temp),
+                ('flowRate', flowRate),
+                ('returnTemperature', returnTemperature),
+                ('q_hb', q_hb),
+                ('q_ba', q_ba),
                 ('t_b', t_b)
             ]
 
-            # Check for invalid values in important variables
             invalid_values = [(name, value) for name, value in important_values if value is None or value == 0]
 
             if invalid_values:
                 self.logToTerminal(f"Skipping addition to spreadsheet due to zero or invalid value: {invalid_values}", messageType="warning")
                 return
 
-            rowPosition = self.tableWidget.rowCount()
-            self.tableWidget.insertRow(rowPosition)
+            new_entry = np.array([[
+                timestamp, temperature, dacVoltage, model_return_temp, flowRate, returnTemperature,
+                q_hb, q_ba, q_hp, q_int, q_bh, t_b
+            ]])
 
-            # Format data for display in the spreadsheet
-            data = [timeData] + [f"{value:.3f}" if value is not None else "N/A" for value in [
-                temperature, dacVoltage, flowRate, model_return_temp, returnTemperature, q_hb, q_ba, q_hp, q_int, q_bh, t_b
-            ]]
-            
-            # Debug print statement to check data being added
-            print("Adding to spreadsheet:", data)
-            
-            # Ensure correct data alignment
-            for index, item in enumerate(data):
-                self.tableWidget.setItem(rowPosition, index, QTableWidgetItem(item))
+            self.data_storage = np.vstack([self.data_storage, new_entry])
 
-            # Scroll to the newly added item for automatic scrolling
-            item = self.tableWidget.item(rowPosition, 0)
-            if item:
-                self.tableWidget.scrollToItem(item)
+            if self.data_storage.shape[0] > 1000:
+                self.data_storage = self.data_storage[-1000:]  # Keep only the latest 1000 entries
+
+            self.tableWidget.setRowCount(len(self.data_storage))
+            for row, data in enumerate(self.data_storage):
+                for col, value in enumerate(data):
+                    if col == 0:  # Time column
+                        item = QTableWidgetItem(value)
+                    else:
+                        item = QTableWidgetItem(f"{float(value):.3f}" if value is not None else 'N/A')
+                    self.tableWidget.setItem(row, col, item)
+
+            if self.csv_file_path:
+                self.csv_buffer.append(new_entry.flatten().tolist())
+                if len(self.csv_buffer) >= self.batch_size:
+                    self.flushCSVBuffer()
+
+            last_row_index = self.tableWidget.rowCount() - 1
+            last_item = self.tableWidget.item(last_row_index, 0)
+            if last_item:
+                self.tableWidget.scrollToItem(last_item)
 
         except ValueError as e:
             self.logToTerminal(f"Error processing data for spreadsheet: {e}", messageType="error")
 
-    def exportToCSV(self):
-        options = QFileDialog.Options()
-        options |= QFileDialog.DontUseNativeDialog
-        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)", options=options)
+    def flushCSVBuffer(self):
+        if not self.csv_file_path:
+            self.logToTerminal("CSV file path not set.", messageType="error")
+            return
 
-        if filePath:
+        if not self.csv_lock_path:
+            self.logToTerminal("CSV lock file path not set.", messageType="error")
+            return
+
+        if self.csv_writer:
+            while self.csv_buffer:
+                self.csv_writer.writerow(self.csv_buffer.popleft())
+            self.csv_file.flush()
+
+    def exportToCSV(self):
+        if not self.csv_file_path:
+            self.saveCSVFileDialog()
+
+        if self.csv_file_path:
             try:
-                with open(filePath, 'w', newline='', encoding='utf-8') as file:
-                    writer = csv.writer(file)
-                    writer.writerow(['Project Number', self.projectNumberInput.text()])
-                    writer.writerow(['Client Name', self.clientNameInput.text()])
-                    writer.writerow(['Date', self.dateInput.text()])
-                    writer.writerow([])
+                if not self.headers_written:
+                    self.csv_writer.writerow(['Project Number', self.projectNumberInput.text()])
+                    self.csv_writer.writerow(['Client Name', self.clientNameInput.text()])
+                    self.csv_writer.writerow(['Date', self.dateInput.text()])
+                    self.csv_writer.writerow([])
                     headers = [self.tableWidget.horizontalHeaderItem(i).text() for i in range(self.tableWidget.columnCount())]
-                    writer.writerow(headers)
-                    for row in range(self.tableWidget.rowCount()):
-                        row_data = []
-                        for column in range(self.tableWidget.columnCount()):
-                            item = self.tableWidget.item(row, column)
-                            if item is not None:
-                                row_data.append(item.text())
-                            else:
-                                row_data.append('')
-                        writer.writerow(row_data)
+                    self.csv_writer.writerow(headers)
+                    self.headers_written = True
+
+                self.flushCSVBuffer()
                 self.logToTerminal("> Data exported to CSV successfully.")
             except Exception as e:
                 self.logToTerminal(f"> Failed to export data to CSV: {e}", messageType="error")
@@ -1011,12 +1108,12 @@ class MainWindow(QtWidgets.QMainWindow):
         Sets up the graph layout and axes.
         """
         # Increase the figure size (width, height)
-        self.figure = Figure(figsize=(10, 12), facecolor='#282C34')
+        self.figure = Figure(figsize=(10, 18), facecolor='#282C34')
         self.canvas = FigureCanvas(self.figure)
         self.canvas.setStyleSheet("QWidget {background-color: #282C34; color: #ABB2BF;}")
 
         # Create a 3-row subplot layout for different graphs with larger height and increased spacing
-        gs = self.figure.add_gridspec(3, 1, height_ratios=[1, 1, 1], hspace=0.5, wspace=0.4)
+        gs = self.figure.add_gridspec(3, 1, height_ratios=[1, 1, 1], hspace=0.15, wspace=0.2)
 
         self.ax_temp = self.figure.add_subplot(gs[0, 0])  # Temperature graph
         self.ax_heat_flow = self.figure.add_subplot(gs[1, 0])  # Heat flow graph
@@ -1046,8 +1143,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax_building_temp.tick_params(axis='y', colors='white')
         self.ax_building_temp.grid(True, color='#4B4B4B')
 
+        # Adding the canvas to the layout
         self.graphLayout.addWidget(self.canvas)
-
+    
     def updateGraph(self):
         """
         Update the graphs with new data from the table widget.
@@ -1057,27 +1155,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ax_heat_flow.clear()
         self.ax_building_temp.clear()
 
+        # Set font properties for bold and larger text
+        title_font = {'size': 20, 'weight': 'bold'}
+        label_font = {'size': 12}
+        tick_font = {'size': 10}
+        legend_font = {'size': 10}
+
         # Set titles and labels with updated styles
-        self.ax_temp.set_title('Temperature Profile Over Time', color='#ABB2BF')
-        self.ax_temp.set_xlabel('Time [hours]', color='#ABB2BF')
-        self.ax_temp.set_ylabel('Temperature [°C]', color='#ABB2BF')
-        self.ax_temp.tick_params(axis='x', colors='white')
-        self.ax_temp.tick_params(axis='y', colors='white')
-        self.ax_temp.grid(True, color='#4B4B4B')
+        self.ax_temp.set_title('Two Mass Model Graph Outputs', color='white', fontdict=title_font)
+        self.ax_temp.set_ylabel('Temperature [°C]', color='white', fontdict=label_font)
+        self.ax_temp.tick_params(axis='x', colors='white', labelsize=tick_font['size'], width=2)
+        self.ax_temp.tick_params(axis='y', colors='white', labelsize=tick_font['size'], width=2)
+        self.ax_temp.grid(True, color='#ABB2BF')
 
-        self.ax_heat_flow.set_title('Heat Flow Profile Over Time', color='#ABB2BF')
-        self.ax_heat_flow.set_xlabel('Time [hours]', color='#ABB2BF')
-        self.ax_heat_flow.set_ylabel('Heat Flow [W]', color='#ABB2BF')
-        self.ax_heat_flow.tick_params(axis='x', colors='white')
-        self.ax_heat_flow.tick_params(axis='y', colors='white')
-        self.ax_heat_flow.grid(True, color='#4B4B4B')
+        self.ax_heat_flow.set_ylabel('Heat Flow [W]', color='white', fontdict=label_font)
+        self.ax_heat_flow.tick_params(axis='x', colors='white', labelsize=tick_font['size'], width=2)
+        self.ax_heat_flow.tick_params(axis='y', colors='white', labelsize=tick_font['size'], width=2)
+        self.ax_heat_flow.grid(True, color='#ABB2BF')
 
-        self.ax_building_temp.set_title('Building Temperature Over Time', color='#ABB2BF')
-        self.ax_building_temp.set_xlabel('Time [hours]', color='#ABB2BF')
-        self.ax_building_temp.set_ylabel('Temperature [°C]', color='#ABB2BF')
-        self.ax_building_temp.tick_params(axis='x', colors='white')
-        self.ax_building_temp.tick_params(axis='y', colors='white')
-        self.ax_building_temp.grid(True, color='#4B4B4B')
+        self.ax_building_temp.set_xlabel('Time [hours]', color='white', fontdict=label_font)
+        self.ax_building_temp.set_ylabel('Temperature [°C]', color='white', fontdict=label_font)
+        self.ax_building_temp.tick_params(axis='x', colors='white', labelsize=tick_font['size'], width=2)
+        self.ax_building_temp.tick_params(axis='y', colors='white', labelsize=tick_font['size'], width=2)
+        self.ax_building_temp.grid(True, color='#ABB2BF')
 
         # Initialize data lists
         time_data, t_sup_data, t_ret_mea_data, t_b_data = [], [], [], []
@@ -1087,9 +1187,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for row in range(self.tableWidget.rowCount()):
             time_item = self.tableWidget.item(row, 0)
             t_sup_item = self.tableWidget.item(row, 1)
-            dacVoltage_item = self.tableWidget.item(row, 2)
-            flow_rate_item = self.tableWidget.item(row, 3)
-            model_return_temp_item = self.tableWidget.item(row, 4)
+            model_return_temp_item = self.tableWidget.item(row, 3)
             t_ret_mea_item = self.tableWidget.item(row, 5)
             q_flow_hb_item = self.tableWidget.item(row, 6)
             q_flow_ba_item = self.tableWidget.item(row, 7)
@@ -1099,9 +1197,15 @@ class MainWindow(QtWidgets.QMainWindow):
             t_b_item = self.tableWidget.item(row, 11)
 
             # Ensure items are not None before accessing text
-            if all(item is not None for item in [time_item, t_sup_item, flow_rate_item, model_return_temp_item, t_ret_mea_item, q_flow_hb_item, q_flow_ba_item, q_flow_hp_item, q_flow_int_item, q_flow_bh_item, t_b_item]):
+            if all(item is not None for item in [time_item, t_sup_item, model_return_temp_item, t_ret_mea_item, q_flow_hb_item, q_flow_ba_item, q_flow_hp_item, q_flow_int_item, q_flow_bh_item, t_b_item]):
                 try:
-                    time_data.append(date2num(datetime.strptime(time_item.text(), '%H:%M:%S')))
+                    time_str = time_item.text()
+                    # Ensure the time format includes milliseconds
+                    if '.' in time_str:
+                        time_data.append(date2num(datetime.strptime(time_str, '%H:%M:%S.%f')))
+                    else:
+                        time_data.append(date2num(datetime.strptime(time_str, '%H:%M:%S')))
+
                     t_sup_data.append(float(t_sup_item.text()))
                     t_ret_mea_data.append(float(t_ret_mea_item.text()))
                     q_flow_hp_data.append(float(q_flow_hp_item.text()))
@@ -1116,28 +1220,29 @@ class MainWindow(QtWidgets.QMainWindow):
         # Plot temperature data
         self.ax_temp.plot(time_data, t_sup_data, label='Supply Temperature (t_sup)', linestyle='-', color='tab:blue')
         self.ax_temp.plot(time_data, t_ret_mea_data, label='Return Temperature (t_ret_mea)', linestyle='--', color='tab:red')
-        self.ax_temp.legend(loc='upper right')
+        self.ax_temp.legend(loc='upper right', prop=legend_font)
         self.ax_temp.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
         # Plot heat flow data
         self.ax_heat_flow.plot(time_data, q_flow_hp_data, label='Heat Flow HP to Transfer System (q_hp)', linestyle='-', color='tab:green')
         self.ax_heat_flow.plot(time_data, q_flow_hb_data, label='Heat Flow to Building (q_hb)', linestyle='-', color='tab:orange')
         self.ax_heat_flow.plot(time_data, q_flow_ba_data, label='Heat Flow Building to Ambient (q_ba)', linestyle='-', color='tab:purple')
-        self.ax_heat_flow.plot(time_data, q_flow_int_data, label='Heat Flow Booster Heater to Heating System (q_bh)', linestyle='-', color='tab:brown')
-        self.ax_heat_flow.plot(time_data, q_flow_bh_data, label='Heat Flow Internal Gains to Building (q_int)', linestyle='-', color='tab:pink')
-        self.ax_heat_flow.legend(loc='upper right')
+        self.ax_heat_flow.plot(time_data, q_flow_int_data, label='Heat Flow Internal Gains to Building (q_int)', linestyle='-', color='tab:pink')
+        self.ax_heat_flow.plot(time_data, q_flow_bh_data, label='Heat Flow Booster Heater to Heating System (q_bh)', linestyle='-', color='tab:brown')
+        self.ax_heat_flow.legend(loc='upper right', prop=legend_font)
         self.ax_heat_flow.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
         # Plot building temperature data
         self.ax_building_temp.plot(time_data, t_b_data, label='Building Temperature (t_b)', linestyle='-', color='tab:gray')
-        self.ax_building_temp.legend(loc='upper right')
+        self.ax_building_temp.legend(loc='upper right', prop=legend_font)
         self.ax_building_temp.xaxis.set_major_formatter(DateFormatter('%H:%M:%S'))
 
         # Update canvas
         self.canvas.draw()
         self.canvas.flush_events()
-
+    
     def closeEvent(self, event):
+        self.flushCSVBuffer()
         dacVoltage = 0
         self.sendSerialCommand(f"setVoltage {dacVoltage}")
 
@@ -1149,16 +1254,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self.logToTerminal("> Serial connection closed.")
 
         reply = QtWidgets.QMessageBox.question(self, 'Terminate Window', 'Are you sure you want to close the window?',
-                                               QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+                                                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
 
         if reply == QtWidgets.QMessageBox.Yes:
+            self.flushCSVBuffer()
             event.accept()
         else:
             event.ignore()
 
-if __name__ == "__main__":
-    app = QtWidgets.QApplication(sys.argv)
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
     applyOneDarkProTheme(app)
-    window = MainWindow()
-    window.show()
+    mainWindow = MainWindow()
+    mainWindow.show()
     sys.exit(app.exec_())
