@@ -4,6 +4,7 @@
     Email: amro.farag@bregroup.com / amrihabfaraj@gmail.com
 """
 
+import os
 import sys
 import csv
 import time
@@ -95,7 +96,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.boostHeatPower = 6000 
 
         self.t_sup_history = []  
-        self.t_ret_history = []  
+        self.t_ret_mea_history = []
+        self.t_ret_history = [] 
 
         self.lastDACVoltage = '0.00'
         self.lastSPtemp = '0.00'
@@ -189,7 +191,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def updateLoadingBar(self):
         if self.loadingStep < 100:
-            self.loadingStep += 1
+            self.loadingStep += 7
             self.progressBar.setValue(self.loadingStep)
             self.progressBar.setVisible(True)
         else:
@@ -198,7 +200,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.loadingStep = 0  # Reset for next use
 
     def startLoadingBar(self):
-        self.loadingStep = 0
+        self.loadingStep = 9
         self.progressBar.setValue(self.loadingStep)
         self.progressBar.setVisible(True)
         self.loadingTimer.start(100)  # Adjust the interval as needed
@@ -303,19 +305,19 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.progressBar.setStyleSheet("""
             QProgressBar {
-                border: none;
-                border-radius: 5px;
-                background-color: #3B4048;
-                color: #ABB2BF;
+                border: 1px solid grey;
+                border-radius: 3px;
                 text-align: center;
+                font: bold 14px;
+                color: #282C34;
+                background-color: #282C34;
             }
-
             QProgressBar::chunk {
                 background-color: #98C379;
-                width: 20px;
-                border-radius: 5px;
+                width: 15px;
+                margin: 1px;
             }
-            """)
+        """)
 
 
         tableLayout.addWidget(self.tableWidget)
@@ -742,6 +744,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     if 'RTemp' in dataDict:
                         try:
                             t_ret_mea = float(dataDict['RTemp'])
+                            self.t_ret_mea_history.append(t_ret_mea)
                             self.returnTemperatureLabel.setText(f"{t_ret_mea:.2f}°C")
                         except ValueError as e:
                             print(f"Error converting return temperature: {e}")
@@ -824,10 +827,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.t_sup_history = []
         if not hasattr(self, 't_ret_history'):
             self.t_ret_history = []
+        if not hasattr(self, 't_ret_mea_history'):
+            self.t_ret_mea_history = []
 
         self.t_sup_history.append(new_t_sup)
 
-        last_t_ret = self.t_ret_history[-1] if self.t_ret_history else new_t_sup - 5
+        # Use the latest measured return temperature if available
+        last_t_ret_mea = self.t_ret_mea_history[-1] if self.t_ret_mea_history else new_t_sup - 5
 
         if self.currentBuildingModel is None:
             return
@@ -837,7 +843,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self.currentBuildingModel.doStep(
                 t_sup=new_t_sup, 
-                t_ret_mea=last_t_ret, 
+                t_ret_mea=last_t_ret_mea, 
                 m_dot=mass_flow, 
                 stepSize=1, 
                 q_dot_int=0 
@@ -847,7 +853,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if new_t_ret < 0:
                 self.logToTerminal(f"Warning: Calculated return temperature is negative ({new_t_ret:.2f}°C). Resetting to last valid temperature.", messageType="error")
-                new_t_ret = last_t_ret
+                new_t_ret = last_t_ret_mea
 
             self.t_ret_history.append(new_t_ret)
 
@@ -1242,24 +1248,45 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.flush_events()
     
     def closeEvent(self, event):
-        self.flushCSVBuffer()
-        dacVoltage = 0
-        self.sendSerialCommand(f"setVoltage {dacVoltage}")
-
-        if self.timer.isActive():
-            self.timer.stop()
-
-        if self.arduinoSerial and self.arduinoSerial.isOpen():
-            self.arduinoSerial.close()
-            self.logToTerminal("> Serial connection closed.")
-
-        reply = QtWidgets.QMessageBox.question(self, 'Terminate Window', 'Are you sure you want to close the window?',
-                                                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
-
-        if reply == QtWidgets.QMessageBox.Yes:
+        try:
+            # Flush any remaining data to the CSV
             self.flushCSVBuffer()
-            event.accept()
-        else:
+
+            # Set DAC voltage to 0
+            dacVoltage = 0
+            self.sendSerialCommand(f"setVoltage {dacVoltage}")
+
+            # Stop the timer if active
+            if self.timer.isActive():
+                self.timer.stop()
+
+            # Close the serial connection if open
+            if self.arduinoSerial and self.arduinoSerial.isOpen():
+                self.arduinoSerial.close()
+                self.logToTerminal("> Serial connection closed.")
+
+            # Release the lock and close the file
+            if hasattr(self, 'csv_lock') and self.csv_lock:
+                self.csv_lock.release()
+                self.csv_file.close()
+                # Delete the lock file if it exists
+                if os.path.exists(self.csv_lock_path):
+                    os.remove(self.csv_lock_path)
+                    self.logToTerminal("> CSV lock file deleted.")
+
+            # Confirm application close with the user
+            reply = QtWidgets.QMessageBox.question(
+                self, 'Terminate Window', 'Are you sure you want to close the window?',
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No
+            )
+
+            if reply == QtWidgets.QMessageBox.Yes:
+                event.accept()
+            else:
+                event.ignore()
+
+        except Exception as e:
+            self.logToTerminal(f"Error during close event: {e}", messageType="error")
             event.ignore()
 
 if __name__ == '__main__':
