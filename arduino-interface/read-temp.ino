@@ -11,10 +11,8 @@ RTC_DS3231 rtc; // Real Time Clock (RTC) object
 DFRobot_GP8403 dac(DFGP8XXX_I2C_DEVICEADDR, RESOLUTION_12_BIT); // DAC object
 
 // Define pin for heating control and initialize variables for temperature, flow rate, etc.
-const int heatingPin = 5; // Digital pin for heating control relay or transistor
-float flowRate = 0.0; // Flow rate variable
+float flowRate = 0.175; // Flow rate variable set to a constant value for simulation
 float targetTemperature = 25.0; // Default target temperature in Celsius
-float tolerance = 0.2; // Temperature tolerance in Celsius
 float desiredVoltage = 0.0; // Desired voltage to be set on the DAC
 float dacVoltage = 0.0;
 float correctionFactor = 0.891;
@@ -47,8 +45,6 @@ void setup() {
     while (1); // Infinite loop if DAC not found
   }
 
-  pinMode(heatingPin, OUTPUT); // Set the heating control pin as an output
-
   // Initialize the temperature and flow rate sample arrays with the initial sensor readings
   float initialTemp = readTemperature(A2);
   float initialReturnTemp = readReturnTemperature(A1);
@@ -67,26 +63,24 @@ void loop() {
     processSerialCommand(command); // Process the received serial command
   }
 
-  if (millis() - lastSampleTime >= 1000) { // Take a sample every second
-    lastSampleTime = millis();
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastSampleTime >= 1000) { // Take a sample every second
+    lastSampleTime += 1000; // Increment by 1000 to avoid drift
     tempSamples[sampleIndex] = readTemperature(A2);
     returnTempSamples[sampleIndex] = readReturnTemperature(A1);
     flowRateSamples[sampleIndex] = readFlowRate(A0);
     sampleIndex = (sampleIndex + 1) % avgSamples;
+
+    float temperature = calculateRunningAverage(tempSamples, avgSamples);
+    float returnTemperature = calculateRunningAverage(returnTempSamples, avgSamples);
+    float averagedFlowRate = calculateRunningAverage(flowRateSamples, avgSamples);
+
+    flowRate = averagedFlowRate;
+
+    setDACVoltage(desiredVoltage); // Update the DAC output voltage
+
+    sendSerialData(temperature, dacVoltage, averagedFlowRate, flowRate, returnTemperature); // Send data over serial
   }
-
-  float temperature = calculateRunningAverage(tempSamples, avgSamples);
-  float returnTemperature = calculateRunningAverage(returnTempSamples, avgSamples);
-  float averagedFlowRate = calculateRunningAverage(flowRateSamples, avgSamples);
-
-  flowRate = averagedFlowRate;
-
-  setDACVoltage(desiredVoltage); // Update the DAC output voltage
-  controlHeating(temperature, targetTemperature, tolerance); // Control heating element based on temperature
-
-  sendSerialData(temperature, desiredVoltage, averagedFlowRate, flowRate, returnTemperature); // Send data over serial
-
-  delay(1000); // Delay for a second before repeating the loop
 }
 
 // Function to read supply temperature
@@ -105,12 +99,9 @@ float readReturnTemperature(int pin) {
   return returnTemperature;
 }
 
-// Function to read flow rate
+// Function to read flow rate (simulated with constant value)
 float readFlowRate(int pin) {
-  int sensorValue = analogRead(pin);
-  float voltage = sensorValue * (5.0 / 1023.0); // Convert the sensor reading to a voltage (0V to 5V)
-  float flowRate = voltage * (1.0 / 5.0); // Example calculation, adjust according to your sensor
-  return flowRate;
+  return 0.175; // Simulated constant flow rate
 }
 
 // Function to calculate running average
@@ -144,15 +135,6 @@ void setDACVoltage(float voltage) {
   dacVoltage = correctedVoltage;
 }
 
-// Function to control heating based on the current and target temperature
-void controlHeating(float currentTemperature, float targetTemp, float tempTolerance) {
-  if (currentTemperature < targetTemp - tempTolerance) {
-    digitalWrite(heatingPin, HIGH); // Turn on heating element
-  } else if (currentTemperature > targetTemp + tempTolerance) {
-    digitalWrite(heatingPin, LOW); // Turn off heating element
-  }
-}
-
 // Function to send collected data over serial
 void sendSerialData(float temperature, float dacVoltage, float averagedFlowRate, float flowRate, float returnTemperature) {
   Serial.print("STemp:");
@@ -173,10 +155,6 @@ void processSerialCommand(String command) {
     targetTemperature = command.substring(8).toFloat();
     Serial.print("New target temperature: ");
     Serial.println(targetTemperature);
-  } else if (command.startsWith("setTolerance ")) {
-    tolerance = command.substring(13).toFloat();
-    Serial.print("New tolerance: ");
-    Serial.println(tolerance);
   } else if (command.startsWith("setVoltage ")) {
     desiredVoltage = command.substring(11).toFloat();
     Serial.print("New DAC voltage: ");
