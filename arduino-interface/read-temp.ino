@@ -11,7 +11,7 @@ RTC_DS3231 rtc; // Real Time Clock (RTC) object
 DFRobot_GP8403 dac(DFGP8XXX_I2C_DEVICEADDR, RESOLUTION_12_BIT); // DAC object
 
 // Define pin for heating control and initialize variables for temperature, flow rate, etc.
-float flowRate = 0.175; // Flow rate variable set to a constant value for simulation
+float flowRate = 0.0; // Flow rate variable
 float targetTemperature = 25.0; // Default target temperature in Celsius
 float desiredVoltage = 0.0; // Desired voltage to be set on the DAC
 float dacVoltage = 0.0;
@@ -24,6 +24,9 @@ float returnTempSamples[avgSamples]; // Array to hold return temperature samples
 float flowRateSamples[avgSamples]; // Array to hold flow rate samples
 int sampleIndex = 0; // Current index in the sample array
 unsigned long lastSampleTime = 0; // Last time a sample was taken
+
+unsigned long lastSyncTime = 0; // Last time RTC was synced
+const unsigned long syncInterval = 6UL * 3600UL * 1000UL; // Sync interval (6 hours)
 
 void setup() {
   Serial.begin(115200); // Begin Serial communication at 115200 baud rate
@@ -65,11 +68,8 @@ void loop() {
 
   unsigned long currentMillis = millis();
   if (currentMillis - lastSampleTime >= 1000) { // Take a sample every second
-    lastSampleTime += 1000; // Increment by 1000 to avoid drift
-    tempSamples[sampleIndex] = readTemperature(A2);
-    returnTempSamples[sampleIndex] = readReturnTemperature(A1);
-    flowRateSamples[sampleIndex] = readFlowRate(A0);
-    sampleIndex = (sampleIndex + 1) % avgSamples;
+    lastSampleTime = currentMillis; // Set to current time to avoid drift
+    takeSample();
 
     float temperature = calculateRunningAverage(tempSamples, avgSamples);
     float returnTemperature = calculateRunningAverage(returnTempSamples, avgSamples);
@@ -78,8 +78,12 @@ void loop() {
     flowRate = averagedFlowRate;
 
     setDACVoltage(desiredVoltage); // Update the DAC output voltage
-
+  
     sendSerialData(temperature, dacVoltage, averagedFlowRate, flowRate, returnTemperature); // Send data over serial
+  }
+
+  if (currentMillis - lastSyncTime >= syncInterval) {
+    lastSyncTime = currentMillis;
   }
 }
 
@@ -99,9 +103,19 @@ float readReturnTemperature(int pin) {
   return returnTemperature;
 }
 
-// Function to read flow rate (simulated with constant value)
+// Function to read flow rate
 float readFlowRate(int pin) {
-  return 0.175; // Simulated constant flow rate
+  float sensorVoltage = readAnalogVoltage(pin);
+  float flowRate = calculateFlowRate(sensorVoltage); // Calculate flow rate based on sensor voltage
+  return flowRate;
+}
+
+// Function to take a sample
+void takeSample() {
+  tempSamples[sampleIndex] = readTemperature(A2);
+  returnTempSamples[sampleIndex] = readReturnTemperature(A1);
+  flowRateSamples[sampleIndex] = readFlowRate(A0);
+  sampleIndex = (sampleIndex + 1) % avgSamples;
 }
 
 // Function to calculate running average
@@ -118,6 +132,12 @@ float readAnalogVoltage(int pin) {
   int sensorValue = analogRead(pin);
   float voltage = sensorValue * (5.0 / 1023.0); // Convert to voltage (assuming 5V reference)
   return voltage;
+}
+
+// Function to calculate flow rate based on sensor voltage (Example function, implement according to your sensor)
+float calculateFlowRate(float sensorVoltage) {
+  flowRate = sensorVoltage * (1.0 / 5.0); // Example conversion, adjust according to your sensor's specifications
+  return flowRate;
 }
 
 // Function to set DAC voltage
