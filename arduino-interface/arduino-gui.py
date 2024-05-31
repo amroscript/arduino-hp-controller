@@ -11,7 +11,7 @@ import time
 import serial
 import numpy as np
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from filelock import FileLock
 from matplotlib.dates import DateFormatter, date2num
 from bamLoadBasedTesting.twoMassModel import CalcParameters
@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget, QPushBut
     QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QFrame, QPlainTextEdit, \
     QTabWidget, QTableWidget, QTableWidgetItem, QFileDialog, QProgressBar, QSplashScreen
 from PyQt5.QtGui import QFont, QColor, QPalette, QPixmap, QIcon
-from PyQt5.QtCore import QTimer, Qt, QSize, QByteArray
+from PyQt5.QtCore import QTimer, Qt, QSize
 
 # Constants for Arduino connection
 ARDUINO_PORT = 'COM4'
@@ -148,7 +148,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toleranceInput = QtWidgets.QLineEdit()
 
         self.headers_written = False
-        self.data_storage = np.empty((0, 12), dtype=object)  # Using NumPy for efficient storage
+        self.simulated_time = datetime.now()  # Initialize simulated time
+        self.data_storage = [] 
         self.csv_buffer = deque()  # Buffer for batch writing to CSV
         self.batch_size = 100  # Define batch size for writing to CSV
         
@@ -174,9 +175,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.graphUpdateTimer.start(1000)
 
         self.initSerialConnection()
-        self.updateButton.setEnabled(True)
-        self.stopButton.setEnabled(True)
-        self.virtualHeaterButton.setEnabled(True)
+        self.updateButton.setEnabled(False)
+        self.stopButton.setEnabled(False)
+        self.virtualHeaterButton.setEnabled(False)
         self.dacVoltageInput.setEnabled(False)
         self.targetTempInput.setEnabled(False)
         self.toleranceInput.setEnabled(False)
@@ -187,18 +188,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.logToTerminal("> Serial connection established. System initialized.")
         except serial.SerialException as e:
             self.logToTerminal(f"> Error connecting to Arduino: {e}", messageType="error")
-            self.retrySerialConnection()
+            QTimer.singleShot(2000, lambda: self.retrySerialConnection(retries=5, delay=2))
 
     def retrySerialConnection(self, retries=5, delay=2):
-        for attempt in range(retries):
+        if retries > 0:
             try:
                 self.arduinoSerial = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
                 self.logToTerminal("> Serial connection re-established.")
-                return
             except serial.SerialException as e:
-                self.logToTerminal(f"> Retry {attempt + 1} failed: {e}", messageType="error")
-                time.sleep(delay)
-        self.logToTerminal("> Failed to establish serial connection after multiple attempts.", messageType="error")
+                self.logToTerminal(f"> Retry {6 - retries} failed: {e}", messageType="error")
+                QTimer.singleShot(delay * 1000, lambda: self.retrySerialConnection(retries - 1, delay))
+        else:
+            self.logToTerminal("> Failed to establish serial connection after multiple attempts.", messageType="error")
 
     def updateLoadingBar(self):
         if self.loadingStep < 100:
@@ -470,7 +471,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addLayout(buttonLayout)
 
         self.applyButtonStyles()
-        self.initButton.clicked.connect(self.initButtonClicked)
+        self.initButton.clicked.connect(lambda: self.initButtonClicked(retry_count=3))
         self.stopButton.clicked.connect(self.stopOperations)
         self.updateButton.clicked.connect(self.updateSettings)
 
@@ -710,9 +711,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.t_sup_history = []
             self.t_ret_history = [float(self.initialReturnTempInput.text())]  # Start with the initial return temperature
 
-            # Ask user to save the file
-            self.saveCSVFileDialog()
-
             self.startLoadingBar()
         except Exception as e:
             self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
@@ -793,7 +791,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     dacVoltage = dataDict.get('DACVolt', self.lastDACVoltage)
                     self.dacVoltageLabel.setText(f"{dacVoltage} V")
                     self.lastDACVoltage = dacVoltage
-
+                    
                     if self.currentBuildingModel:
                         model_return_temp = self.currentBuildingModel.t_ret
                         if model_return_temp >= 0:
@@ -801,6 +799,8 @@ class MainWindow(QtWidgets.QMainWindow):
                             self.lastSPtemp = model_return_temp
                         else:
                             self.SPVoltageLabel.setText("")
+                    else:
+                        model_return_temp = None  # Ensure model_return_temp is always defined
 
                     flowRate = dataDict.get('FlowRate', self.lastFlowRate)
                     self.flowRateLabel.setText(f"{flowRate} L/s")
@@ -820,7 +820,17 @@ class MainWindow(QtWidgets.QMainWindow):
                             t_b = self.currentBuildingModel.MassB.T
 
                         if self.currentBuildingModel:
-                            self.addToSpreadsheet(datetime.now().strftime('%H:%M:%S'), dataDict['STemp'], dacVoltage, model_return_temp, flowRate, dataDict.get('RTemp', 'N/A'), q_hb, q_ba, q_hp, q_int, q_bh, t_b)
+                            self.addToSpreadsheet(
+                                self.simulated_time.strftime('%H:%M:%S'), 
+                                dataDict['STemp'], 
+                                dacVoltage, 
+                                model_return_temp if model_return_temp is not None else "N/A", 
+                                flowRate, 
+                                dataDict.get('RTemp', 'N/A'), 
+                                q_hb, q_ba, q_hp, q_int, q_bh, t_b
+                            )
+
+                        self.simulated_time += timedelta(seconds=1)  # Increment simulated time by one second
 
                     self.updateGraph()
 
@@ -863,7 +873,7 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as e:
             self.logToTerminal(f"> Failed to update settings: {e}", messageType="error")
 
-    def updateBuildingModel(self, new_t_sup):
+    def updateBuildingModel(self, new_t_sup, retry_count=3):
         if not hasattr(self, 't_sup_history'):
             self.t_sup_history = []
         if not hasattr(self, 't_ret_history'):
@@ -893,8 +903,7 @@ class MainWindow(QtWidgets.QMainWindow):
             new_t_ret = self.currentBuildingModel.t_ret
 
             if new_t_ret < 0:
-                self.logToTerminal(f"Warning: Calculated return temperature is negative ({new_t_ret:.2f}°C). Resetting to last valid temperature.", messageType="error")
-                new_t_ret = last_t_ret_mea
+                raise ValueError(f"Calculated return temperature is negative ({new_t_ret:.2f}°C).")
 
             self.t_ret_history.append(new_t_ret)
 
@@ -903,6 +912,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         except Exception as e:
             self.logToTerminal(f"Failed to update building model: {e}", messageType="error")
+            if retry_count > 0:
+                self.logToTerminal(f"Retrying building model initialization... {retry_count} retries left", messageType="warning")
+                # Avoid prompting for CSV save again during retries
+                self.initializeBuildingModel()
+                self.initButtonClicked(retry_count - 1)
+            else:
+                self.logToTerminal("Exceeded maximum retries for building model initialization.", messageType="error")
             
     def sendSerialCommand(self, command):
         if self.arduinoSerial and self.arduinoSerial.isOpen():
@@ -925,10 +941,10 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.sendSerialCommand(command)
 
-    def initButtonClicked(self):
+    def initButtonClicked(self, retry_count):
         """
         Handles the initialization button click event.
-        
+
         This function establishes the serial connection, starts the update timer,
         initializes the building model, and enables relevant UI components.
         """
@@ -953,7 +969,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.targetTempInput.setEnabled(True)
         self.toleranceInput.setEnabled(True)
 
+        # Check if the CSV file path is already set before calling saveCSVFileDialog
+        if not self.csv_file_path:
+            self.saveCSVFileDialog()
+
         self.initializeBuildingModel()
+
+        if retry_count < 3:
+            self.logToTerminal(f"Retry successful.", messageType="info")
 
     def stopOperations(self):
         dacVoltage = 0
@@ -1001,17 +1024,11 @@ class MainWindow(QtWidgets.QMainWindow):
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
         filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)", options=options)
-        if filePath:
-            self.setCSVFilePath(filePath)
-            self.logToTerminal(f"> CSV file set to save at: {filePath}")
-            self.initCSVFile()  # Initialize CSV file with headers
-        else:
-            self.logToTerminal("> CSV file save canceled.", messageType="warning")
+        
+        # Ensure the file has a .csv extension
+        if filePath and not filePath.endswith('.csv'):
+            filePath += '.csv'
 
-    def saveCSVFileDialog(self):
-        options = QFileDialog.Options()
-        options |= QFileDialog.DontUseNativeDialog
-        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)", options=options)
         if filePath:
             self.setCSVFilePath(filePath)
             self.logToTerminal(f"> CSV file set to save at: {filePath}")
@@ -1062,35 +1079,12 @@ class MainWindow(QtWidgets.QMainWindow):
             q_bh = float(q_bh) if q_bh != 'N/A' else None
             t_b = float(t_b) if t_b != 'N/A' else None
 
-            if any(value is None or value == 0 for value in [temperature, dacVoltage, model_return_temp, flowRate, returnTemperature] if value is not None):
-                self.logToTerminal("Skipping addition to spreadsheet due to zero or invalid value.", messageType="warning")
-                return
-
-            important_values = [
-                ('temperature', temperature),
-                ('model_return_temp', model_return_temp),
-                ('flowRate', flowRate),
-                ('returnTemperature', returnTemperature),
-                ('q_hb', q_hb),
-                ('q_ba', q_ba),
-                ('t_b', t_b)
-            ]
-
-            invalid_values = [(name, value) for name, value in important_values if value is None or value == 0]
-
-            if invalid_values:
-                self.logToTerminal(f"Skipping addition to spreadsheet due to zero or invalid value: {invalid_values}", messageType="warning")
-                return
-
-            new_entry = np.array([[
+            new_entry = [
                 timestamp, temperature, dacVoltage, model_return_temp, flowRate, returnTemperature,
                 q_hb, q_ba, q_hp, q_int, q_bh, t_b
-            ]])
+            ]
 
-            self.data_storage = np.vstack([self.data_storage, new_entry])
-
-            if self.data_storage.shape[0] > 1000:
-                self.data_storage = self.data_storage[-1000:]  # Keep only the latest 1000 entries
+            self.data_storage.append(new_entry)
 
             self.tableWidget.setRowCount(len(self.data_storage))
             for row, data in enumerate(self.data_storage):
@@ -1102,7 +1096,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.tableWidget.setItem(row, col, item)
 
             if self.csv_file_path:
-                self.csv_buffer.append(new_entry.flatten().tolist())
+                self.csv_buffer.append(new_entry)
                 if len(self.csv_buffer) >= self.batch_size:
                     self.flushCSVBuffer()
 
@@ -1134,6 +1128,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self.csv_file_path:
             try:
+                self.finalizeLogging()
                 if not self.headers_written:
                     self.csv_writer.writerow(['Project Number', self.projectNumberInput.text()])
                     self.csv_writer.writerow(['Client Name', self.clientNameInput.text()])
