@@ -7,7 +7,6 @@
 import os
 import sys
 import csv
-import time
 import serial
 import numpy as np
 from collections import deque
@@ -177,7 +176,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.initSerialConnection()
         self.updateButton.setEnabled(False)
         self.stopButton.setEnabled(False)
-        self.virtualHeaterButton.setEnabled(False)
+        self.virtualHeaterButton.setEnabled(True)
         self.dacVoltageInput.setEnabled(False)
         self.targetTempInput.setEnabled(False)
         self.toleranceInput.setEnabled(False)
@@ -203,7 +202,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def updateLoadingBar(self):
         if self.loadingStep < 100:
-            self.loadingStep += 7
+            self.loadingStep += 9
             self.progressBar.setValue(self.loadingStep)
             self.progressBar.setVisible(True)
         else:
@@ -212,7 +211,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.loadingStep = 0  # Reset for next use
 
     def startLoadingBar(self):
-        self.loadingStep = 9
+        self.loadingStep = 11
         self.progressBar.setValue(self.loadingStep)
         self.progressBar.setVisible(True)
         self.loadingTimer.start(100)  # Adjust the interval as needed
@@ -222,7 +221,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tabWidget = QTabWidget(self)
 
         # Set a larger window size to accommodate the graphs
-        self.setMinimumSize(1500, 950)
+        self.setMinimumSize(1800, 1000)
 
         # Logo Setup
         self.logoLabel = QLabel()
@@ -233,10 +232,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Create QProgressBar
         self.progressBar = QProgressBar(self)
-        self.progressBar.setGeometry(200, 80, 250, 20)
         self.progressBar.setMaximum(100)
         self.progressBar.setVisible(False)
-        self.progressBar.setTextVisible(False)  
+        self.progressBar.setTextVisible(False)
+
+        # Set minimum and maximum height to make it thinner
+        self.progressBar.setMinimumHeight(10)
+        self.progressBar.setMaximumHeight(10) 
 
         controlsTab = QWidget()
         controlsLayout = QVBoxLayout()
@@ -333,7 +335,7 @@ class MainWindow(QtWidgets.QMainWindow):
             }
             QProgressBar::chunk {
                 background-color: #98C379;
-                width: 15px;
+                width: 5px;
                 margin: 1px;
             }
         """)
@@ -362,7 +364,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(tabWidget)
         applyOneDarkProTheme(QApplication.instance())
         
-
     def createMeasurementGroup(self):
         group = QGroupBox("Instructions and Real-time Measurements")
         group.setFont(QFont("Verdana", 11, QFont.Bold))
@@ -379,6 +380,7 @@ class MainWindow(QtWidgets.QMainWindow):
         </p>
         """)
         instructionsLabel.setFont(QFont("Verdana", 11))
+        instructionsLabel.setWordWrap(True)  # Ensure text wraps within the layout
         instructionsLayout.addWidget(instructionsLabel)
 
         line = QFrame()
@@ -392,7 +394,7 @@ class MainWindow(QtWidgets.QMainWindow):
             }
         """)
 
-        mainLayout.addLayout(instructionsLayout)
+        mainLayout.addLayout(instructionsLayout, 1) 
         mainLayout.addWidget(line)
 
         dataLayout = QGridLayout()
@@ -408,7 +410,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         for label in [temperatureLabel, dacVoltageLabel, SPVoltageLabel, flowRateLabel, returnTemperatureLabel]:
             label.setFont(uniform_font)
-            label.setStyleSheet("padding-left: 20px;")  # Adjust the padding as needed
+            label.setStyleSheet("padding-left: 20px;")  
 
         self.temperatureLabel = QLabel("0°C")
         self.dacVoltageLabel = QLabel("0V")
@@ -430,7 +432,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dataLayout.addWidget(dacVoltageLabel, 5, 0)
         dataLayout.addWidget(self.dacVoltageLabel, 5, 1)
 
-        mainLayout.addLayout(dataLayout)
+        mainLayout.addLayout(dataLayout, 1) 
         
         return group
 
@@ -481,14 +483,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def validateVirtualHeaterSettings(self):
         try:
             ambient_temp = float(self.ambientTempInput.text())
-            q_design_e = float(self.designHeatingPowerInput.text())
             t_start_h = float(self.initialReturnTempInput.text())
 
             if not -40 <= ambient_temp <= 40:
                 self.logToTerminal("Ambient temperature out of expected range: -40 to 40°C", messageType="warning")
-                return False
-            if q_design_e <= 0:
-                self.logToTerminal("Design heating power must be greater than 0.", messageType="warning")
                 return False
             if not 10 <= t_start_h <= 90:
                 self.logToTerminal("Initial return temperature out of expected range: 10 to 90°C", messageType="warning")
@@ -531,25 +529,36 @@ class MainWindow(QtWidgets.QMainWindow):
             }
         """
 
-        self.ambientTempInput = QLineEdit("7")
+        self.ambientTempInput = QLineEdit("7.00")
         self.ambientTempInput.setStyleSheet(line_edit_style)
+        self.ambientTempInput.textChanged.connect(self.updateDesignHeatingPower)
         self.addSettingWithButtons(layout, "██████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  Ambient Temperature:", self.ambientTempInput, 0, font_size=10.5)
 
-        self.designHeatingPowerInput = QLineEdit("3750")
+        self.designHeatingPowerInput = QLineEdit("4010.00")
         self.designHeatingPowerInput.setStyleSheet(line_edit_style)
         self.addSettingWithButtons(layout, "██████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  Design Heating Power:", self.designHeatingPowerInput, 1, font_size=10.5)
 
-        self.initialReturnTempInput = QLineEdit("25")
+        self.initialReturnTempInput = QLineEdit("25.00")
         self.initialReturnTempInput.setStyleSheet(line_edit_style)
         self.addSettingWithButtons(layout, "██████████████████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  Initial SP Temperature:", self.initialReturnTempInput, 2, font_size=10.5)
 
         group.setLayout(layout)
         return group
     
+    def updateDesignHeatingPower(self):
+        try:
+            ambient_temp = float(self.ambientTempInput.text())
+            default_q_design_e = float(self.designHeatingPowerInput.text())
+            q_design_e, _, _ = self.adjustDesignParameters(ambient_temp, default_q_design_e)
+            self.designHeatingPowerInput.setText(f"{q_design_e:.2f}")
+        except ValueError:
+            # Do not show an error message here to avoid interrupting user input
+            pass
+    
     def applyButtonStyles(self):
         buttonFontSize = "8pt" 
 
-        self.initButton.setStyleSheet(f"""
+        self.initButton.setStyleSheet(f"""\
             QPushButton {{
                 background-color: #98C379;
                 color: white;
@@ -596,7 +605,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.virtualHeaterSettingsGroup.setTitle("PARAMETERS READY TO MODIFY")
             self.virtualHeaterSettingsGroup.setStyleSheet(activeStyle)
             self.ambientTempInput.setEnabled(True)
-            self.designHeatingPowerInput.setEnabled(True)
+            self.designHeatingPowerInput.setEnabled(False)
             self.initialReturnTempInput.setEnabled(True)
         else:
             self.virtualHeaterSettingsGroup.setTitle("PARAMETERS READ-ONLY")
@@ -688,9 +697,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             ambient_temp = float(self.ambientTempInput.text())
-            default_q_design_e = 5500  # Default design heat power at -10°C
+        except ValueError:
+            self.logToTerminal("Invalid ambient temperature input. Please enter a numeric value.", messageType="warning")
+            return
+
+        try:
+            default_q_design_e = float(self.designHeatingPowerInput.text())
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from l/h to kg/s, ensure non-zero
+
+            # Update the design heating power input in the UI
+            self.designHeatingPowerInput.setText(f"{q_design_e:.2f}")
 
             # Proper initialization of CalcParameters
             calc_params = CalcParameters(
@@ -732,11 +749,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def adjustDesignParameters(self, ambient_temp, default_q_design_e):
         heat_pump_sizes = {
-            -10: (1.0, 5500, 55),
-            -7: (0.885, 5000, 52),
-            2: (0.538, 7000, 42),
-            7: (0.346, 10800, 36),
-            12: (0.154, 24300, 30)
+            -10: (1.0, 11590, 55),
+            -7: (0.885, 10250, 52),
+            2: (0.538, 6240, 42),
+            7: (0.346, 4010, 36),
+            12: (0.154, 1780, 30)
         }
 
         closest_temp = None
@@ -751,10 +768,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         partLoadR, q_design, t_flow_design = heat_pump_sizes[closest_temp]
 
-        new_q_design_e = q_design * partLoadR
+        new_q_design_e = q_design
         boostHeat = ambient_temp <= -10
 
-        print(f"Ambient Temp: {ambient_temp}, Part Load Ratio: {partLoadR}, Default Design Heating Power: {new_q_design_e}, Target Flow Temp: {t_flow_design}")
+        print(f"Ambient Temp: {ambient_temp}, Part Load Ratio: {partLoadR}, Design Heating Power: {new_q_design_e}, Target Flow Temp: {t_flow_design}")
 
         return new_q_design_e, t_flow_design, boostHeat
 
@@ -836,7 +853,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         except serial.SerialException as e:
             self.logToTerminal(f"> Error reading from serial: {e}", messageType="error")
-
+            
     def updateSettings(self):
         """
         Validates and updates the virtual heater settings only when explicitly invoked by the user interaction with
@@ -849,9 +866,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             ambient_temp = float(self.ambientTempInput.text())
-            default_q_design_e = 5500  # Default design heat power at -10°C
+            default_q_design_e = float(self.designHeatingPowerInput.text())
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from L/h to kg/s to ensure non-zero mass flow
+
+            # Update the design heating power input in the UI
+            self.designHeatingPowerInput.setText(f"{q_design_e:.2f}")
 
             # Recalculate parameters and update the building model
             calc_params = CalcParameters(
@@ -872,6 +892,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.logToTerminal("> Settings updated successfully.", messageType="info")
         except Exception as e:
             self.logToTerminal(f"> Failed to update settings: {e}", messageType="error")
+
 
     def updateBuildingModel(self, new_t_sup, retry_count=3):
         if not hasattr(self, 't_sup_history'):
@@ -976,7 +997,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.initializeBuildingModel()
 
         if retry_count < 3:
-            self.logToTerminal(f"Retry successful.", messageType="info")
+            self.logToTerminal(f"Retry successful. Model Initialized.", messageType="info")
 
     def stopOperations(self):
         dacVoltage = 0
