@@ -684,13 +684,6 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(container, row, columnSpan)
 
     def initializeBuildingModel(self):
-        """
-        Initializes the building model with the current parameters from the UI inputs.
-        
-        This function validates the virtual heater settings and initializes the building model
-        using the CalcParameters class. It also initializes temperature histories and logs the
-        initialization status to the terminal.
-        """
         if not self.validateVirtualHeaterSettings():
             self.logToTerminal("> Invalid virtual heater settings. Please check your inputs.", messageType="warning")
             return
@@ -702,7 +695,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         try:
-            default_q_design_e = float(self.designHeatingPowerInput.text())
+            default_q_design_e = 11590  # Use this constant value for the calculations
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from l/h to kg/s, ensure non-zero
 
@@ -727,11 +720,13 @@ class MainWindow(QtWidgets.QMainWindow):
             # Initialize temperature histories
             self.t_sup_history = []
             self.t_ret_history = [float(self.initialReturnTempInput.text())]  # Start with the initial return temperature
+            
+            self.updateButton.setEnabled(True)
 
             self.startLoadingBar()
         except Exception as e:
             self.logToTerminal(f"> Failed to initialize building model: {e}", messageType="error")
-
+        
     def tempToVoltage(self, temp):
         min_temp = 0
         max_temp = 100
@@ -747,13 +742,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return corrected_voltage
 
-    def adjustDesignParameters(self, ambient_temp, default_q_design_e):
+    def adjustDesignParameters(self, ambient_temp, default_q_design_e=11590):
         heat_pump_sizes = {
             -10: (1.0, 11590, 55),
-            -7: (0.885, 10250, 52),
-            2: (0.538, 6240, 42),
-            7: (0.346, 4010, 36),
-            12: (0.154, 1780, 30)
+            -7: (0.885, 11590, 52),
+            2: (0.538, 11590, 42),
+            7: (0.346, 11590, 36),
+            12: (0.154, 11590, 30)
         }
 
         closest_temp = None
@@ -766,9 +761,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if closest_temp is None:
             closest_temp = min(heat_pump_sizes.keys())
 
-        partLoadR, q_design, t_flow_design = heat_pump_sizes[closest_temp]
-
-        new_q_design_e = q_design
+        partLoadR, base_q_design, t_flow_design = heat_pump_sizes[closest_temp]
+        new_q_design_e = partLoadR * base_q_design  # Adjust q_design based on part load ratio
         boostHeat = ambient_temp <= -10
 
         print(f"Ambient Temp: {ambient_temp}, Part Load Ratio: {partLoadR}, Design Heating Power: {new_q_design_e}, Target Flow Temp: {t_flow_design}")
@@ -866,7 +860,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             ambient_temp = float(self.ambientTempInput.text())
-            default_q_design_e = float(self.designHeatingPowerInput.text())
+            default_q_design_e = 11590  # Use this constant value for the calculations
             q_design_e, t_flow_design, boostHeat = self.adjustDesignParameters(ambient_temp, default_q_design_e)
             mass_flow = max(self.currentMassFlow / 3600.0, 0.001)  # Convert from L/h to kg/s to ensure non-zero mass flow
 
@@ -1010,7 +1004,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.arduinoSerial.close()
             self.logToTerminal("> Serial connection closed.")
 
-        self.updateButton.setEnabled(True)
+        self.updateButton.setEnabled(False)
         self.stopButton.setEnabled(True)
         self.virtualHeaterButton.setEnabled(False)
         self.dacVoltageInput.setEnabled(False)
